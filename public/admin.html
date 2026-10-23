@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<!-- CTRANSLATE ADMIN - meetings, people, languages, translation and voice settings, API keys.
+     Build: server.py BUILD_VERSION. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#151922">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CT Admin">
+<link rel="manifest" href="/apps/admin.webmanifest">
+<link rel="apple-touch-icon" href="/apps/admin-180.png">
+<link rel="icon" href="/apps/admin-192.png">
+<title>CTRANSLATE Admin</title>
+<link rel="stylesheet" href="/app.css?v=__BUILD__">
+<style>
+  .grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px}
+  .grid2 label{display:flex;align-items:center;font-size:13px;padding:6px 8px;background:var(--bg);border:1px solid var(--line);border-radius:6px}
+  .opt{display:flex;gap:10px;align-items:flex-start;padding:10px;border:1px solid var(--line);border-radius:8px;margin-top:8px;background:var(--bg);cursor:pointer}
+  .opt input{margin-top:3px}
+  .opt b{display:block;font-size:13px}
+  .opt span{color:var(--mute);font-size:11px}
+  .res{font-size:12px;padding:8px 10px;border-left:3px solid var(--line);margin-top:6px;background:var(--bg);word-break:break-word}
+  .res.ok{border-color:var(--green)} .res.bad{border-color:var(--red)}
+  .actions-inline{display:flex;gap:6px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<header>
+  <div><h1><a href="/">CTRANSLATE</a></h1><div class="build" id="buildStamp"></div></div>
+  <div class="spacer"></div>
+  <div class="who" id="who"></div>
+  <button class="btn" id="signout" hidden>SIGN OUT</button>
+  <div class="brand" title="Conklin Office Furniture — Research and Development">
+    <img src="/brand.png" alt="CONKLIN OFFICE FURNITURE" style="width:107px;height:24px;display:block">
+    <svg width="107" height="9" viewBox="0 0 107 9" style="display:block;margin-top:1px"><text x="0" y="8" textLength="107" lengthAdjust="spacingAndGlyphs" font-family="'DM Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace" font-size="7.5" font-weight="700" fill="#f5a524">RESEARCH AND DEVELOPMENT</text></svg>
+  </div>
+</header>
+
+<main class="page" id="page"><div class="empty">Loading…</div></main>
+
+<script src="/i18n.js?v=__BUILD__"></script>
+<script src="/qr.js?v=__BUILD__"></script>
+<script src="/app.js?v=__BUILD__"></script>
+<script>
+"use strict";
+const $ = VM.$, esc = VM.esc;
+let tab = VM.store.get('adminTab', 'meetings');
+
+async function init() {
+  try { await VM.load(); }
+  catch (e) { $('page').innerHTML = '<div class="card"><h2>Not connected</h2><p>' + esc(e.message) + '</p></div>'; return; }
+  VM.header('ADMIN'); VM.watchBuild(); VM.registerApp('admin');
+  if (!VM.me) return VM.signIn($('page'), {title: 'Admin sign-in', note: 'First time? Sign in as "Admin" with the PIN the installer printed (also in admin-pin.txt on the server).', done: () => init()});
+  if (VM.me.kind !== 'user' || VM.me.role !== 'admin') {
+    $('page').innerHTML = '<div class="card"><h2>Admins only</h2><p>Speakers use <a href="/speak">CTRANSLATE Speak</a>; listeners use <a href="/listen">CTRANSLATE Listen</a>.</p></div>';
+    return;
+  }
+  render();
+}
+
+function render() {
+  VM.store.set('adminTab', tab);
+  $('page').innerHTML = '<div class="tabs">' + [['meetings', 'MEETINGS'], ['people', 'PEOPLE'], ['settings', 'SETTINGS']]
+    .map(([k, l]) => '<button class="btn big' + (tab === k ? ' on' : '') + '" data-tab="' + k + '">' + l + '</button>').join('') + '</div><div id="body"></div>';
+  $('page').querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { tab = b.dataset.tab; render(); });
+  ({meetings, people, settings})[tab]();
+}
+
+/* ---------- meetings ---------- */
+let showEnded = false;
+async function meetings() {
+  $('body').innerHTML = '<div class="card"><div class="row" style="margin-bottom:10px">' +
+    '<button class="btn big go" id="m-instant">⚡ INSTANT QR MEETING</button><button class="btn big" id="m-new">+ SCHEDULE</button>' +
+    '<span class="spacer"></span><label style="display:flex;align-items:center;font-size:12px"><input type="checkbox" id="m-ended"' + (showEnded ? ' checked' : '') + '>Show ended</label></div>' +
+    '<div class="list" id="m-list"><div class="empty">Loading…</div></div></div>';
+  $('m-new').onclick = () => VM.editMeeting(null, () => meetings());
+  $('m-ended').onchange = e => { showEnded = e.target.checked; meetings(); };
+  $('m-instant').onclick = instant;
+  let ms;
+  try { ms = (await VM.api('GET', 'meetings' + (showEnded ? '?all=1' : ''))).meetings; }
+  catch (e) { $('m-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; return; }
+  if (!showEnded) ms = ms.filter(m => m.status !== 'ended');
+  $('m-list').innerHTML = ms.length ? '' : '<div class="empty">No meetings. Start an instant QR meeting or schedule one.</div>';
+  ms.forEach(m => {
+    const d = document.createElement('div'); d.className = 'item'; d.style.flexWrap = 'wrap';
+    const when = m.status === 'live' ? 'LIVE · ' + m.online + ' CONNECTED' : m.status === 'ended' ? 'ENDED ' + VM.fmtWhen(m.endedAt)
+      : m.standing ? 'STANDING ROOM · WAITING' : VM.fmtWhen(m.start);
+    const access = m.access === 'anyone' ? 'QR / GUESTS' + (m.onsite ? ' (WI-FI ONLY)' : '') : m.access === 'staff' ? 'ALL STAFF' : 'INVITED';
+    d.innerHTML = '<span class="dot ' + (m.status === 'live' ? 'live' : '') + '"></span><div class="grow" style="min-width:200px"><div class="t">' + esc(m.title) + '</div>' +
+      '<div class="s">' + esc(when) + ' · CODE ' + esc(m.code) + ' · ' + access + '</div>' +
+      '<div class="s">Speakers: ' + (m.hosts.map(h => esc(h.name)).join(', ') || '—') + (m.listeners.length ? ' · ' + m.listeners.length + ' invited' : '') + '</div></div>' +
+      '<div class="actions-inline">' +
+      (m.status !== 'ended' ? '<a class="btn" href="/speak?m=' + encodeURIComponent(m.id) + '">OPEN CONSOLE</a><button class="btn" data-a="qr">QR</button>' : '') +
+      '<button class="btn" data-a="edit">EDIT</button>' +
+      (m.status === 'live' ? '<button class="btn stop" data-a="end">' + (m.standing ? 'END SESSION' : 'END') + '</button>' : m.status !== 'ended' ? '<button class="btn go" data-a="start">START</button>' : '<button class="btn" data-a="start">REOPEN</button>') +
+      '<a class="btn" href="/api/meetings/' + encodeURIComponent(m.id) + '/transcript">TRANSCRIPT</a>' +
+      '<button class="btn" data-a="del">DELETE</button></div>';
+    d.querySelectorAll('[data-a]').forEach(b => b.onclick = () => act(m, b.dataset.a));
+    $('m-list').appendChild(d);
+  });
+}
+async function act(m, a) {
+  try {
+    if (a === 'qr') return VM.share(m, () => meetings());
+    if (a === 'edit') return VM.editMeeting(m, () => meetings());
+    if (a === 'start') await VM.api('POST', 'meetings/' + m.id + '/start');
+    if (a === 'end') { if (!(await VM.confirm('End “' + m.title + '” for everyone?', 'END', true))) return; await VM.api('POST', 'meetings/' + m.id + '/end'); }
+    if (a === 'del') { if (!(await VM.confirm('Delete “' + m.title + '” and its transcript? Printed QR sheets stop working.', 'DELETE', true))) return; await VM.api('DELETE', 'meetings/' + m.id); }
+    meetings();
+  } catch (e) { VM.toast(e.message); }
+}
+function instant() {
+  const now = new Date();
+  const d = VM.modal('<h3>INSTANT QR MEETING</h3>' +
+    '<label class="f" for="i-title">Title</label><input id="i-title" maxlength="120" value="' + esc('Meeting ' + now.toLocaleDateString(undefined, {month: 'short', day: 'numeric'})) + '">' +
+    '<label style="display:flex;align-items:center;margin-top:14px;font-size:13px"><input type="checkbox" id="i-standing" checked>Standing room — the same QR code for every session (a sign on the wall)</label>' +
+    '<label style="display:flex;align-items:center;margin-top:10px;font-size:13px"><input type="checkbox" id="i-onsite"' + (VM.config.onsiteReady ? ' checked' : '') + '>Only phones on the company Wi-Fi can join</label>' +
+    '<div class="err-text" id="i-err"></div>' +
+    '<div class="actions"><button class="btn big" data-close>CANCEL</button><button class="btn big go" id="i-go">CREATE</button></div>');
+  d.q('#i-go').onclick = async () => {
+    try {
+      const r = await VM.api('POST', 'meetings', {instant: true, title: d.q('#i-title').value,
+        standing: d.q('#i-standing').checked, onsite: d.q('#i-onsite').checked});
+      d.close(); meetings(); VM.share(r.meeting, () => meetings());
+    } catch (e) { d.q('#i-err').textContent = e.message; }
+  };
+}
+
+/* ---------- people ---------- */
+async function people() {
+  $('body').innerHTML = '<div class="card"><div class="row" style="margin-bottom:10px"><button class="btn big go" id="p-add">+ ADD PERSON</button>' +
+    '<input id="p-filter" class="grow" placeholder="Search"></div><div class="list" id="p-list"><div class="empty">Loading…</div></div>' +
+    '<p class="hint">Listeners who only scan QR codes don’t need an account. Add the people who speak, run meetings, or should see invited meetings in their app.</p></div>';
+  $('p-add').onclick = () => person(null);
+  let ps;
+  try { ps = (await VM.api('GET', 'people')).people; } catch (e) { $('p-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; return; }
+  const draw = () => {
+    const f = $('p-filter').value.trim().toLowerCase();
+    $('p-list').innerHTML = '';
+    ps.filter(p => !f || p.name.toLowerCase().includes(f)).forEach(p => {
+      const d = document.createElement('div'); d.className = 'item';
+      d.innerHTML = '<span class="chip on" style="--chip:' + VM.lang(p.lang).color + '">' + esc(VM.lang(p.lang).tag) + '</span>' +
+        '<div class="grow"><div class="t">' + esc(p.name) + (p.active ? '' : ' <span class="chip">INACTIVE</span>') + '</div>' +
+        '<div class="s">' + esc(p.role.toUpperCase()) + ' · ' + (p.lastSeen ? 'LAST SEEN ' + esc(VM.fmtWhen(p.lastSeen)) : 'NEVER SIGNED IN') + '</div></div>' +
+        '<button class="btn">EDIT</button>';
+      d.querySelector('button').onclick = () => person(p);
+      $('p-list').appendChild(d);
+    });
+    if (!$('p-list').children.length) $('p-list').innerHTML = '<div class="empty">Nobody matches.</div>';
+  };
+  $('p-filter').oninput = draw;
+  draw();
+}
+function randomPin(n) { const a = new Uint32Array(n); crypto.getRandomValues(a); return Array.from(a, x => x % 10).join(''); }
+function person(p) {
+  const isNew = !p;
+  p = p || {name: '', role: 'speaker', lang: 'en', active: true};
+  const d = VM.modal('<h3>' + (isNew ? 'ADD PERSON' : 'EDIT ' + esc(p.name.toUpperCase())) + '</h3>' +
+    '<label class="f" for="pe-name">Name (they type it to sign in)</label><input id="pe-name" maxlength="60" value="' + esc(p.name) + '">' +
+    '<div class="row"><div class="grow"><label class="f" for="pe-role">Role</label><select id="pe-role">' +
+    '<option value="listener">Listener — listens</option><option value="speaker">Speaker — speaks, creates meetings</option><option value="admin">Admin — everything</option></select></div>' +
+    '<div class="grow"><label class="f" for="pe-lang">Language</label><select id="pe-lang"></select></div></div>' +
+    '<label class="f" for="pe-pin">' + (isNew ? 'PIN' : 'New PIN (leave empty to keep)') + '</label>' +
+    '<div class="row"><input id="pe-pin" class="grow" inputmode="numeric" maxlength="12" autocomplete="off"><button class="btn" id="pe-gen">GENERATE</button></div>' +
+    (isNew ? '' : '<label style="display:flex;align-items:center;margin-top:12px;font-size:13px"><input type="checkbox" id="pe-active"' + (p.active ? ' checked' : '') + '>Can sign in</label>') +
+    '<div class="err-text" id="pe-err"></div>' +
+    '<div class="actions">' + (isNew ? '' : '<button class="btn big stop" id="pe-del" style="margin-right:auto">REMOVE</button>') +
+    '<button class="btn big" data-close>CANCEL</button><button class="btn big go" id="pe-save">SAVE</button></div>');
+  d.q('#pe-role').value = p.role;
+  VM.fillLangs(d.q('#pe-lang'), p.lang, VM.config.allLanguages.map(l => l.id));
+  d.q('#pe-gen').onclick = () => { d.q('#pe-pin').value = randomPin(d.q('#pe-role').value === 'admin' ? 8 : 6); };
+  if (isNew) d.q('#pe-gen').click();
+  d.q('#pe-save').onclick = async () => {
+    const body = {name: d.q('#pe-name').value, role: d.q('#pe-role').value, lang: d.q('#pe-lang').value};
+    const pin = d.q('#pe-pin').value.trim();
+    if (pin) body.pin = pin;
+    if (!isNew) body.active = d.q('#pe-active').checked;
+    try {
+      if (isNew) await VM.api('POST', 'people', body); else await VM.api('PUT', 'people/' + p.id, body);
+      d.close();
+      if (pin) VM.modal('<h3>GIVE THIS TO ' + esc(body.name.toUpperCase()) + '</h3><p>Name: <b>' + esc(body.name) + '</b><br>PIN: <b style="font-size:22px;letter-spacing:.2em">' + esc(pin) + '</b></p>' +
+        '<p class="hint">They sign in once in ' + (body.role === 'listener' ? 'CTRANSLATE Listen' : 'CTRANSLATE Speak') + ' at ' + esc(location.origin + (body.role === 'listener' ? '/listen' : '/speak')) + ', and can pin it to their home screen.</p>' +
+        '<div class="actions"><button class="btn big go" data-close>DONE</button></div>');
+      people();
+    } catch (e) { d.q('#pe-err').textContent = e.message; }
+  };
+  const del = d.q('#pe-del');
+  if (del) del.onclick = async () => {
+    if (!(await VM.confirm('Remove ' + p.name + '?', 'REMOVE', true))) return;
+    try { await VM.api('DELETE', 'people/' + p.id); d.close(); people(); } catch (e) { d.q('#pe-err').textContent = e.message; }
+  };
+}
+
+/* ---------- settings ---------- */
+async function settings() {
+  let s;
+  try { s = (await VM.api('GET', 'settings')).settings; } catch (e) { $('body').innerHTML = '<div class="card">' + esc(e.message) + '</div>'; return; }
+  const radio = (name, val, opts) => opts.map(([v, t, sub]) =>
+    '<label class="opt"><input type="radio" name="' + name + '" value="' + v + '"' + (val === v ? ' checked' : '') + '><div><b>' + t + '</b><span>' + sub + '</span></div></label>').join('');
+  const check = (id, on, t) => '<label style="display:flex;align-items:center;margin-top:10px;font-size:13px"><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '>' + t + '</label>';
+  const keyField = (id, label, set, hint, help) => '<label class="f" for="' + id + '">' + label + '</label>' +
+    '<div class="row"><input id="' + id + '" class="grow" type="password" autocomplete="off" placeholder="' + (set ? 'Set (' + esc(hint) + ') — type to replace' : 'Not set') + '">' +
+    (set && hint.startsWith('…') ? '<button class="btn" data-clear="' + id + '">CLEAR</button>' : '') + '</div><div class="hint">' + help + '</div>';
+  $('body').innerHTML =
+    '<div class="card"><h2>Organization</h2>' +
+    '<label class="f" for="s-org">Name (printed on QR sheets)</label><input id="s-org" value="' + esc(s.orgName) + '">' +
+    '<label class="f" for="s-url">Public address</label><input id="s-url" placeholder="https://meet.example.com" value="' + esc(s.publicUrl) + '">' +
+    '<div class="hint">The address in QR codes and join links: the Cloudflare Tunnel or Let’s Encrypt name. Empty = whatever address this page was opened at.</div></div>' +
+
+    '<div class="card"><h2>Languages offered</h2><div class="grid2">' + VM.config.allLanguages.map(l =>
+      '<label><input type="checkbox" name="lang" value="' + l.id + '"' + (s.languages.includes(l.id) ? ' checked' : '') + '>' + esc(l.label) + ' · ' + l.tag + '</label>').join('') + '</div></div>' +
+
+    '<div class="card"><h2>Translation</h2>' + radio('mt', s.mtEngine, [
+      ['claude', 'Claude (recommended)', 'Best with names, product terms and the glossary below. Falls back to Google, then the free service. Needs an Anthropic key.'],
+      ['google', 'Google Cloud Translation', 'Fast and reliable. 500,000 characters a month free, then $20 per million. Needs the Google key.'],
+      ['free', 'Free Google endpoint', 'No key, no cost. Unofficial: Google can limit or change it without notice.']]) +
+    '<div class="row"><div class="grow"><label class="f" for="s-model">Claude model</label><select id="s-model">' + s.claudeModels.map(m => '<option>' + m + '</option>').join('') + '</select></div>' +
+    '<div class="grow"><label class="f" for="s-effort">Effort</label><select id="s-effort"><option>low</option><option>medium</option><option>high</option></select></div></div>' +
+    '<div class="hint">claude-haiku-5-5 is the fastest and costs least (about $0.15 an hour at four languages). Larger models add delay and cost.</div>' +
+    '<label class="f" for="s-gloss">Glossary (Claude follows it)</label><textarea id="s-gloss" placeholder="Conklin = keep as Conklin&#10;work cell = área de trabajo (es)&#10;forklift = chariot élévateur (fr)">' + esc(s.glossary) + '</textarea>' +
+    check('s-live', s.liveCaptions, 'Live captions: show the words while they are still being spoken (text only)') + '</div>' +
+
+    '<div class="card"><h2>Voice</h2>' + radio('tts', s.ttsEngine, [
+      ['google', 'Server voices (recommended)', 'Google Cloud voices, Swahili included. If one fails: Azure if a key is set, then Google Translate’s free read-aloud, then the phone’s own voice.'],
+      ['device', 'Phone’s own voice only', 'Free and instant, but quality and languages depend on each phone, and it can stop when the screen locks.'],
+      ['off', 'Text only', 'No voice; listeners read.']]) +
+    '<div class="row"><div class="grow"><label class="f" for="s-tier">Google voice family</label><select id="s-tier">' +
+    '<option value="wavenet">WaveNet — natural, $4/M after 4M free</option><option value="neural2">Neural2 — natural, $16/M after 1M free</option>' +
+    '<option value="chirp3-hd">Chirp 3 HD — most natural, $30/M after 1M free</option><option value="standard">Standard — plain, $4/M after 4M free</option></select></div>' +
+    '<div class="grow"><label class="f" for="s-gender">Voice</label><select id="s-gender"><option value="FEMALE">Female</option><option value="MALE">Male</option><option value="NEUTRAL">Any</option></select></div>' +
+    '<div style="width:120px"><label class="f" for="s-rate">Speed</label><input id="s-rate" type="number" min="0.5" max="2" step="0.05" value="' + s.speakingRate + '"></div></div>' +
+    check('s-free', s.freeVoice, 'Use Google Translate’s free read-aloud when no paid voice exists for a language (unofficial)') +
+    '<label class="f" for="s-region">Azure Speech region</label><input id="s-region" value="' + esc(s.azureRegion) + '" placeholder="eastus"></div>' +
+
+    '<div class="card"><h2>Speech recognition</h2>' +
+    check('s-stt', s.serverStt, 'Offer speakers the Google recognizer (any microphone, every browser). Uses the Google key; Google bills it by the minute after a free monthly allowance.') +
+    '<div class="hint">Without it, speakers use their phone or PC’s own recognizer: free, Chrome, Edge or Safari.</div></div>' +
+
+    '<div class="card"><h2>Guests and records</h2>' +
+    check('s-guests', s.guestsAllowed, 'Allow QR-code guests (listen without an account)') +
+    '<label class="f" for="s-site">Factory internet address(es) — for “guests only on the company Wi-Fi”</label>' +
+    '<div class="row"><input id="s-site" class="grow" placeholder="203.0.113.7" value="' + esc((s.siteIps || []).join(' ')) + '"><button class="btn" id="s-myip">USE MY CURRENT ADDRESS</button></div>' +
+    '<div class="hint">Phones on the Wi-Fi reach CTRANSLATE through the Cloudflare Tunnel too, so CTRANSLATE tells on-site phones by the factory’s public address. Press the button while on the factory Wi-Fi. Not needed if you don’t use the tunnel.</div>' +
+    '<label class="f" for="s-days">Keep transcripts for (days)</label><input id="s-days" type="number" min="1" max="3650" value="' + s.transcriptDays + '" style="max-width:140px"></div>' +
+
+    '<div class="card"><h2>API keys</h2>' +
+    keyField('k-google', 'Google Cloud API key', s.googleKeySet, s.googleKeyHint, 'One key for Text-to-Speech, Translation and Speech-to-Text. In Google Cloud: enable those three APIs, then Credentials → Create API key, restricted to them.') +
+    keyField('k-anthropic', 'Anthropic API key', s.anthropicKeySet, s.anthropicKeyHint, 'For Claude translation. console.anthropic.com → API keys.') +
+    keyField('k-azure', 'Azure Speech key (optional)', s.azureKeySet, s.azureKeyHint, 'Optional backup voices if Google fails. Azure portal → Speech service; 500,000 characters a month free.') +
+    '<p class="hint">Keys are kept on the server (settings.json, readable only by the CTRANSLATE service) and never sent to phones.</p></div>' +
+
+    '<div class="card"><h2>Hear each language</h2>' +
+    '<label class="f" for="v-text">Sentence (English)</label><input id="v-text" maxlength="300" value="Good morning, welcome to the training, my name is Wes.">' +
+    '<div class="list" id="v-list" style="margin-top:10px"></div>' +
+    '<div class="hint">Translated and voiced the way a meeting does it, with the saved settings. Save first if you changed a key.</div></div>' +
+    '<div class="card"><div class="row"><button class="btn big go" id="s-save">SAVE SETTINGS</button><button class="btn big" id="s-test">TEST ENGINES</button></div>' +
+    '<div class="err-text" id="s-err"></div><div id="s-results"></div></div>';
+  $('s-model').value = s.claudeModel; $('s-effort').value = s.claudeEffort;
+  $('s-tier').value = s.voiceTier; $('s-gender').value = s.voiceGender;
+  const cleared = new Set();
+  $('body').querySelectorAll('[data-clear]').forEach(b => b.onclick = () => { cleared.add(b.dataset.clear); $(b.dataset.clear).placeholder = 'Will be removed on save'; b.remove(); });
+  $('s-save').onclick = async () => {
+    const pick = n => (document.querySelector('input[name=' + n + ']:checked') || {}).value;
+    const body = {orgName: $('s-org').value, publicUrl: $('s-url').value,
+      languages: Array.from(document.querySelectorAll('input[name=lang]:checked')).map(i => i.value),
+      mtEngine: pick('mt'), ttsEngine: pick('tts'), claudeModel: $('s-model').value, claudeEffort: $('s-effort').value,
+      glossary: $('s-gloss').value, liveCaptions: $('s-live').checked, voiceTier: $('s-tier').value, voiceGender: $('s-gender').value,
+      speakingRate: +$('s-rate').value || 1, freeVoice: $('s-free').checked, azureRegion: $('s-region').value,
+      serverStt: $('s-stt').checked, guestsAllowed: $('s-guests').checked, transcriptDays: +$('s-days').value || 30,
+      siteIps: $('s-site').value.trim().split(/[\s,]+/).filter(Boolean)};
+    [['k-google', 'googleKey'], ['k-anthropic', 'anthropicKey'], ['k-azure', 'azureKey']].forEach(([id, k]) => {
+      const v = $(id).value.trim();
+      if (v) body[k] = v; else if (cleared.has(id)) body[k] = '';
+    });
+    $('s-err').textContent = '';
+    try { await VM.api('PUT', 'settings', body); VM.config = await VM.api('GET', 'config'); VM.toast('Settings saved.'); settings(); }
+    catch (e) { $('s-err').textContent = e.message; }
+  };
+  $('s-myip').onclick = async () => {
+    try { const r = await VM.api('GET', 'myip'); const cur = $('s-site').value.trim(); if (!cur.split(/[\s,]+/).includes(r.ip)) $('s-site').value = (cur + ' ' + r.ip).trim(); VM.toast('Added ' + r.ip + '. Save to keep it.'); }
+    catch (e) { VM.toast(e.message); }
+  };
+  const sample = new Audio();
+  VM.config.languages.forEach(l => {
+    const row = document.createElement('div'); row.className = 'item';
+    row.innerHTML = '<span class="chip on" style="--chip:' + l.color + '">' + esc(l.tag) + '</span>' +
+      '<div class="grow"><div class="t">' + esc(l.label) + '</div><div class="s" data-out>\u2014</div></div>' +
+      '<button class="btn big">\u25b6 PLAY</button>';
+    const out = row.querySelector('[data-out]'), btn = row.querySelector('button');
+    btn.onclick = async () => {
+      btn.disabled = true; out.textContent = 'Translating and voicing\u2026';
+      try {
+        const r = await VM.api('POST', 'settings/voice-sample', {text: $('v-text').value, lang: l.id});
+        out.textContent = r.text + '  \u00b7  ' + r.voice;
+        if (r.url) { sample.src = r.url; await sample.play(); }
+        else if (window.speechSynthesis) { const u = new SpeechSynthesisUtterance(r.text); u.lang = l.tts || l.sr; speechSynthesis.cancel(); speechSynthesis.speak(u); }
+      } catch (e) { out.textContent = e.message; }
+      btn.disabled = false;
+    };
+    $('v-list').appendChild(row);
+  });
+  $('s-test').onclick = async () => {
+    $('s-results').innerHTML = '<div class="empty">Testing (save first if you changed a key)…</div>';
+    try {
+      const r = (await VM.api('POST', 'settings/test')).results;
+      $('s-results').innerHTML = r.map(x => '<div class="res ' + (x.ok ? 'ok' : 'bad') + '"><b>' + esc(x.engine) + '</b>' + (x.ms != null ? ' · ' + x.ms + ' ms' : '') +
+        '<br>' + esc(typeof x.result === 'string' ? x.result : JSON.stringify(x.result)) + '</div>').join('');
+    } catch (e) { $('s-results').innerHTML = '<div class="res bad">' + esc(e.message) + '</div>'; }
+  };
+}
+
+init();
+</script>
+</body>
+</html>

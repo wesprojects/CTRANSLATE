@@ -1,0 +1,69 @@
+#cloud-config
+# ============================================================
+#  CTRANSLATE SERVER - Ubuntu Server 24.04 autoinstall answers
+#
+#  Don't edit the copies on the ISO; build-iso.sh fills this in twice:
+#    ctranslate/ask/user-data    asks which disk and the login account
+#    ctranslate/auto/user-data   no questions; erases the largest disk
+#                           (only when built with --password)
+#  The three placeholder lines below (INTERACTIVE, STORAGE, IDENTITY) are filled in by the build.
+# ============================================================
+autoinstall:
+  version: 1
+  refresh-installer:
+    update: no
+@INTERACTIVE@
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+
+  # DHCP on every wired port. "e*", not "en*": a machine that names its port eth0
+  # would otherwise get no network at all. Wi-Fi is not set up here: a server belongs
+  # on a cable, and the setup menu (sudo ctranslate-setup) sets a fixed address later.
+  network:
+    version: 2
+    ethernets:
+      wired:
+        match:
+          name: "e*"
+        dhcp4: true
+
+  # Nothing the server needs comes from the network during the install: each of these
+  # scans hardware and downloads, and one failure aborts the whole install.
+  drivers:
+    install: false
+  codecs:
+    install: false
+  oem:
+    install: false
+  source:
+    id: ubuntu-server
+    search_drivers: false
+  packages: []
+
+  ssh:
+    install-server: true
+    allow-pw: true
+
+@STORAGE@
+@IDENTITY@
+  late-commands:
+    - |
+      set -eu
+      SRC=""
+      for c in /cdrom/ctranslate /media/ctranslate; do [ -d "$c/app" ] && SRC="$c" && break; done
+      [ -n "$SRC" ] || { echo "!! CTRANSLATE files not found on the install media"; exit 1; }
+      echo "ctranslate: installing from $SRC"
+      mkdir -p /target/opt/ctranslate-media
+      cp -r "$SRC/app" /target/opt/ctranslate-media/
+      [ -d "$SRC/pkgs" ] && cp -r "$SRC/pkgs" /target/opt/ctranslate-media/
+      install -m 755 "$SRC/ctranslate-firstboot.sh" /target/usr/local/sbin/ctranslate-firstboot.sh
+      install -m 644 "$SRC/ctranslate-firstboot.service" "$SRC/ctranslate-welcome.service" /target/etc/systemd/system/
+      # cloud-init must leave apt alone on the first boot (it would hold the dpkg lock).
+      mkdir -p /target/etc/cloud/cloud.cfg.d
+      printf '%s\n' 'package_update: false' 'package_upgrade: false' \
+        > /target/etc/cloud/cloud.cfg.d/99-ctranslate-no-apt.cfg
+      curtin in-target --target=/target -- systemctl enable ctranslate-firstboot.service
+      # wait-online waits for every port with no time limit: a second port without a
+      # cable would hold the first boot forever.
+      curtin in-target --target=/target -- systemctl mask systemd-networkd-wait-online.service || true

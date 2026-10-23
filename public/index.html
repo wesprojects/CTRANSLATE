@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<!-- CTRANSLATE - the front door: the three apps, and a box for a meeting code. Build: server.py BUILD_VERSION. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#151922">
+<link rel="icon" href="/apps/listen-192.png">
+<title>CTRANSLATE</title>
+<link rel="stylesheet" href="/app.css?v=__BUILD__">
+<style>
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+  .tile{display:flex;align-items:center;gap:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;color:var(--ink);text-decoration:none}
+  .tile:hover{border-color:var(--mute)}
+  .tile img{width:64px;height:64px;border-radius:14px}
+  .tile b{display:block;font-size:15px;letter-spacing:.16em}
+  .tile span{color:var(--mute);font-size:11px;line-height:1.5}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>CTRANSLATE</h1><div class="build" id="buildStamp"></div></div>
+  <div class="spacer"></div>
+  <div class="who" id="who"></div>
+  <button class="btn" id="signout" hidden>SIGN OUT</button>
+  <div class="brand" title="Conklin Office Furniture — Research and Development">
+    <img src="/brand.png" alt="CONKLIN OFFICE FURNITURE" style="width:107px;height:24px;display:block">
+    <svg width="107" height="9" viewBox="0 0 107 9" style="display:block;margin-top:1px"><text x="0" y="8" textLength="107" lengthAdjust="spacingAndGlyphs" font-family="'DM Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace" font-size="7.5" font-weight="700" fill="#f5a524">RESEARCH AND DEVELOPMENT</text></svg>
+  </div>
+</header>
+<main class="page">
+  <div class="tiles">
+    <a class="tile" href="/listen"><img src="/apps/listen-192.png" alt=""><div><b>LISTEN</b><span>Hear and read a meeting in your language.</span></div></a>
+    <a class="tile" href="/speak" id="t-speak"><img src="/apps/speak-192.png" alt=""><div><b>SPEAK</b><span>Talk in your language. Start a QR meeting.</span></div></a>
+    <a class="tile" href="/admin" id="t-admin"><img src="/apps/admin-192.png" alt=""><div><b>ADMIN</b><span>People, meetings, languages, voices.</span></div></a>
+  </div>
+  <div class="card" style="margin-top:16px"><h2>Meeting code</h2>
+    <form class="row" id="code-form"><input id="code" class="grow" placeholder="ABC234" autocapitalize="characters" maxlength="8" style="text-transform:uppercase;letter-spacing:.2em;font-size:18px"><button class="btn big go">GO</button></form>
+  </div>
+  <p class="hint">Open an app, then pin it: on iPhone tap Share &rarr; Add to Home Screen; on Android tap &#8942; &rarr; Install app; on a PC use the install icon in the address bar.</p>
+</main>
+<script src="/app.js?v=__BUILD__"></script>
+<script>
+"use strict";
+(async function () {
+  try { await VM.load(); } catch (e) {}
+  VM.header(''); VM.watchBuild();
+  const role = VM.me && VM.me.kind === 'user' ? VM.me.role : '';
+  if (role === 'listener') { VM.$('t-speak').hidden = true; VM.$('t-admin').hidden = true; }
+  if (role === 'speaker') VM.$('t-admin').hidden = true;
+  VM.$('code-form').onsubmit = e => { e.preventDefault(); const v = VM.$('code').value.trim().toUpperCase(); if (v) location.href = '/j/' + encodeURIComponent(v); };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# Runtime data written beside server.py; never committed
+users.json
+meetings.json
+sessions.json
+settings.json
+admin-pin.txt
+transcripts/
+certs/
+*.tmp
+__pycache__/
+# Installer ISO builds
+*.iso
+.build-iso/

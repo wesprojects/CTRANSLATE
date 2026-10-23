@@ -1,0 +1,27 @@
+[Unit]
+Description=CTRANSLATE first boot: install CTRANSLATE from the install media
+# Not network-online.target: with two ports, wait-online blocks with no limit while one
+# has no cable. The script waits up to a minute for an address and needs none.
+After=network.target
+Wants=network.target
+# Tells its progress on the console instead of a silent login prompt.
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+StartLimitIntervalSec=1800
+StartLimitBurst=20
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ctranslate-firstboot.sh
+# The login prompt comes back unless the setup walk-through took the screen.
+ExecStopPost=/bin/sh -c '[ -e /run/ctranslate-welcome-pending ] || systemctl --no-block start getty@tty1.service'
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

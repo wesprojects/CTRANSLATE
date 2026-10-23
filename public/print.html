@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<!-- CTRANSLATE printable QR sheet: /print?m=<meeting id>. One page, black on white, sized for
+     Letter and A4. Scanning the code opens the listener app on that meeting with no sign-up. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CTRANSLATE sheet</title>
+<style>
+  @page{size:auto;margin:12mm}
+  *{box-sizing:border-box}
+  body{margin:0;background:#e9ecf1;color:#111;font:14px/1.4 'SF Mono',ui-monospace,Menlo,Consolas,monospace}
+  .tools{display:flex;gap:10px;justify-content:center;padding:14px;flex-wrap:wrap}
+  .tools button,.tools a{font:12px var(--x,inherit);letter-spacing:.1em;padding:10px 16px;border-radius:6px;border:1px solid #333;background:#fff;cursor:pointer;color:#111;text-decoration:none}
+  .tools .go{background:#111;color:#fff}
+  .sheet{background:#fff;width:min(100%,190mm);margin:0 auto 24px;padding:14mm 12mm;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.15)}
+  .org{font-size:11px;letter-spacing:.3em;color:#555}
+  h1{font-size:30px;margin:6px 0 2px;letter-spacing:.02em;font-family:system-ui,sans-serif}
+  .sub{font-size:13px;color:#444}
+  .qr{width:min(118mm,80vw);margin:8mm auto 4mm}
+  .qr svg{width:100%;height:auto;display:block}
+  .code{font-size:34px;letter-spacing:.35em;font-weight:700;margin:0 0 2mm}
+  .url{font-size:12px;color:#444;word-break:break-all}
+  .lines{margin:7mm auto 0;max-width:150mm;text-align:left;border-top:2px solid #111;padding-top:4mm}
+  .line{display:flex;gap:10px;align-items:baseline;padding:2.2mm 0;border-bottom:1px solid #ddd;font-family:system-ui,sans-serif}
+  .line b{min-width:28mm;font-size:13px}
+  .line span{font-size:17px}
+  .line[dir=rtl]{flex-direction:row-reverse;text-align:right}
+  .foot{margin-top:6mm;font-size:10px;color:#666;letter-spacing:.08em}
+  .icons{font-size:28px;letter-spacing:.4em;margin-top:2mm}
+  @media print{body{background:#fff}.tools{display:none}.sheet{box-shadow:none;margin:0 auto;width:100%;padding:0}}
+</style>
+</head>
+<body>
+<div class="tools" id="tools"><button class="go" onclick="print()">PRINT</button><button onclick="history.length > 1 ? history.back() : close()">BACK</button></div>
+<div class="sheet" id="sheet">Loading…</div>
+<script src="/i18n.js?v=__BUILD__"></script>
+<script src="/qr.js?v=__BUILD__"></script>
+<script src="/app.js?v=__BUILD__"></script>
+<script>
+"use strict";
+(async function () {
+  const esc = VM.esc, id = new URLSearchParams(location.search).get('m');
+  try {
+    await VM.load();
+    const m = (await VM.api('GET', 'meetings/' + id)).meeting;
+    const link = VM.joinLink(m);
+    const langs = VM.config.languages;
+    document.title = 'CTRANSLATE — ' + m.title;
+    VM.$('sheet').innerHTML =
+      '<div class="org">' + esc((VM.config.orgName || '').toUpperCase()) + '</div>' +
+      '<h1>' + esc(m.title) + '</h1>' +
+      '<div class="sub">' + (m.standing ? 'This code works for every session in this room.' : esc(VM.fmtWhen(m.start || m.startedAt))) + '</div>' +
+      '<div class="icons">\u{1F4F1} → \u{1F3A7}</div>' +
+      '<div class="qr">' + VMQR.svg(link) + '</div>' +
+      '<div class="code">' + esc(m.code) + '</div>' +
+      '<div class="url">' + esc(link) + '</div>' +
+      '<div class="lines">' + langs.map(l =>
+        '<div class="line"' + (l.id === 'ar' ? ' dir="rtl"' : '') + '><b>' + esc(l.label) + '</b><span>' + esc(VMT(l.id, 'scan')) + '</span></div>').join('') + '</div>' +
+      '<div class="foot">' + (m.onsite ? 'Connect to the company Wi-Fi first. ' : '') + 'No app to install and no sign-up. Headphones work.</div>';
+    if (new URLSearchParams(location.search).get('auto') === '1') setTimeout(print, 400);
+  } catch (e) {
+    VM.$('sheet').textContent = e.status === 401 ? 'Sign in to CTRANSLATE Speak or Admin first, then print the sheet again.' : e.message;
+  }
+})();
+</script>
+</body>
+</html>

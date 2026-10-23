@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<!-- CTRANSLATE SPEAK - talk in your own language; every listener hears and reads it in theirs.
+     Speech becomes text on this device (the browser's recognizer, free) or through the
+     server (Google Speech-to-Text, any microphone). Build: server.py BUILD_VERSION. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#151922">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Speak">
+<link rel="manifest" href="/apps/speak.webmanifest">
+<link rel="apple-touch-icon" href="/apps/speak-180.png">
+<link rel="icon" href="/apps/speak-192.png">
+<title>CTRANSLATE Speak</title>
+<link rel="stylesheet" href="/app.css?v=__BUILD__">
+<style>
+  .console{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+  .mic-area{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 12px;
+    padding-bottom:calc(14px + env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--line)}
+  .mic{width:min(220px,60vw);height:min(220px,60vw);max-height:26vh;max-width:26vh;min-width:120px;min-height:120px;border-radius:50%;
+    border:3px solid var(--green);background:color-mix(in srgb,var(--green) 14%,transparent);color:var(--ink);
+    font:700 13px/1.3 var(--mono);letter-spacing:.14em;cursor:pointer;touch-action:none;user-select:none;-webkit-user-select:none;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+  .mic{position:relative}
+  .mic > svg.glyph{width:42%;height:auto}
+  .mic svg.ring{position:absolute;inset:-9px;width:calc(100% + 18px);height:calc(100% + 18px);transform:rotate(-90deg);pointer-events:none}
+  .mic svg.ring circle{fill:none;stroke:var(--amber);stroke-width:5;stroke-linecap:round;stroke-dasharray:100;stroke-dashoffset:100;opacity:0}
+  .mic.holding svg.ring circle{opacity:1;stroke-dashoffset:0;transition:stroke-dashoffset var(--hold,1500ms) linear}
+  .mic.on{border-color:var(--red);background:color-mix(in srgb,var(--red) 22%,transparent);animation:ring 1.4s ease-in-out infinite}
+  .mic:disabled{opacity:.35;cursor:default;animation:none}
+  @keyframes ring{0%,100%{box-shadow:0 0 0 0 rgba(255,107,107,.45)}50%{box-shadow:0 0 0 16px rgba(255,107,107,0)}}
+  @media (prefers-reduced-motion:reduce){.mic.on{animation:none}}
+  .meter{width:min(260px,70vw);height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+  .meter i{display:block;height:100%;width:0;background:var(--green);transition:width .08s}
+  .opts{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center}
+  .opts select{width:auto;padding:8px;font-size:12px}
+  .trs{margin-top:4px}
+  .trs div{font-size:calc(var(--cap-size)*.42);color:var(--mute);line-height:1.35}
+  .trs b{color:var(--ink);font-weight:600;margin-right:6px}
+  .startbox{display:flex;flex-direction:column;align-items:center;gap:10px;padding:18px}
+</style>
+</head>
+<body>
+<header>
+  <div><h1><a href="/">CTRANSLATE</a></h1><div class="build" id="buildStamp"></div></div>
+  <div class="spacer"></div>
+  <div class="who" id="who"></div>
+  <button class="btn" id="signout" hidden>SIGN OUT</button>
+  <div class="brand" title="Conklin Office Furniture — Research and Development">
+    <img src="/brand.png" alt="CONKLIN OFFICE FURNITURE" style="width:107px;height:24px;display:block">
+    <svg width="107" height="9" viewBox="0 0 107 9" style="display:block;margin-top:1px"><text x="0" y="8" textLength="107" lengthAdjust="spacingAndGlyphs" font-family="'DM Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace" font-size="7.5" font-weight="700" fill="#f5a524">RESEARCH AND DEVELOPMENT</text></svg>
+  </div>
+</header>
+
+<main class="page" id="page"><div class="empty">Loading…</div></main>
+
+<section class="console" id="console" hidden>
+  <div class="topline">
+    <button class="btn" id="c-back">BACK</button>
+    <div style="flex:1;min-width:0">
+      <div class="title" id="c-title"></div>
+      <div class="meta"><span class="dot" id="c-dot"></span> <span id="c-meta"></span></div>
+    </div>
+    <button class="btn" id="c-share">QR</button>
+    <button class="btn" id="c-people">PEOPLE</button>
+    <button class="btn" id="c-menu">&#8942;</button>
+  </div>
+  <div class="feed" id="feed">
+    <div class="empty" id="feed-empty">What you say, and what other speakers say in your language, shows here.</div>
+    <div class="live-line" id="liveline" hidden><span class="who" id="live-who"></span><span class="txt" id="live-txt"></span></div>
+  </div>
+  <div class="startbox" id="startbox" hidden>
+    <div class="hint" id="start-hint"></div>
+    <button class="btn big go" id="c-start" style="min-width:240px;min-height:60px;font-size:15px">START MEETING</button>
+  </div>
+  <div class="mic-area" id="mic-area" hidden>
+    <div class="opts">
+      <select id="s-lang" aria-label="I speak"></select>
+      <select id="s-mode" aria-label="Talk mode"><option value="lock">TAP TO START · HOLD TO STOP</option><option value="tap">TAP TO START · TAP TO STOP</option><option value="hold">PUSH TO TALK (HOLD)</option></select>
+      <select id="s-engine" aria-label="Recognizer" hidden></select>
+      <select id="s-mic" aria-label="Microphone" hidden></select>
+    </div>
+    <button class="mic" id="mic" aria-pressed="false">
+      <svg class="ring" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="46" pathLength="100"/></svg>
+      <svg class="glyph" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="8.5" y="2" width="7" height="12.5" rx="3.5"/><path d="M5 11.5a7 7 0 0 0 14 0" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="11.1" y="18" width="1.8" height="3.2"/><rect x="8" y="20.6" width="8" height="1.6" rx=".8"/></svg>
+      <span id="mic-label">TAP TO START</span>
+    </button>
+    <div class="meter" id="meter" hidden><i id="meter-i"></i></div>
+    <div class="opts">
+      <button class="btn" id="s-hear">HEAR OTHERS: OFF</button>
+      <button class="btn" id="s-trs">SHOW TRANSLATIONS: ON</button>
+      <button class="btn stop" id="c-end">END</button>
+    </div>
+  </div>
+</section>
+
+<script src="/i18n.js?v=__BUILD__"></script>
+<script src="/qr.js?v=__BUILD__"></script>
+<script src="/app.js?v=__BUILD__"></script>
+<script>
+"use strict";
+const $ = VM.$, esc = VM.esc;
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const params = new URLSearchParams(location.search);
+let prefs = Object.assign({mode: 'lock', engine: SR ? 'device' : 'server', mic: '', hear: false, trs: true}, VM.store.get('speak', {}));
+const savePrefs = () => VM.store.set('speak', prefs);
+let meeting = null, stream = null, cid = null, rec = null, talking = false, shown = new Set(), others = {};
+const P = new VM.Player();
+
+/* ---------- start ---------- */
+async function init() {
+  try { await VM.load(); }
+  catch (e) { $('page').innerHTML = '<div class="card"><h2>Not connected</h2><p>' + esc(e.message) + '</p></div>'; return; }
+  VM.header('SPEAK'); VM.watchBuild(); VM.registerApp('speak');
+  if (!VM.me) return signIn();
+  if (VM.me.kind !== 'user' || VM.me.role === 'listener') {
+    $('page').innerHTML = '<div class="card"><h2>Speakers only</h2><p>This app is for speakers and admins. To listen, open <a href="/listen">CTRANSLATE Listen</a>.</p></div>';
+    return;
+  }
+  if (params.get('m')) return openConsole(params.get('m'));
+  home();
+}
+function signIn() {
+  VM.signIn($('page'), {title: 'Sign in to speak', note: 'Use the name and PIN your admin gave you.', done: () => { VM.header('SPEAK'); init(); }});
+}
+
+async function home() {
+  history.replaceState(null, '', '/speak');
+  $('page').hidden = false; $('console').hidden = true; document.body.classList.remove('fixed');
+  $('page').innerHTML =
+    '<div class="card"><h2>I speak</h2><select id="h-lang"></select></div>' +
+    '<div class="card"><h2>Start</h2><div class="row">' +
+    '<button class="btn big go grow" id="h-instant">⚡ INSTANT QR MEETING</button>' +
+    '<button class="btn big grow" id="h-new">+ SCHEDULE A MEETING</button></div>' +
+    '<p class="hint">An instant meeting is live right away. Print or show its QR code; people scan it, pick their language and listen. No sign-up.</p></div>' +
+    '<div class="card"><h2>My meetings</h2><div class="list" id="h-list"><div class="empty">Loading…</div></div></div>';
+  VM.fillLangs($('h-lang'), VM.me.lang);
+  $('h-lang').onchange = async e => { try { VM.me = (await VM.api('PUT', 'me', {lang: e.target.value})).me; VM.toast('Saved.'); } catch (x) { VM.toast(x.message); } };
+  $('h-new').onclick = () => VM.editMeeting(null, m => openConsole(m.id));
+  $('h-instant').onclick = instant;
+  try {
+    const ms = (await VM.api('GET', 'meetings')).meetings.filter(m => m.canHost && m.status !== 'ended');
+    $('h-list').innerHTML = ms.length ? '' : '<div class="empty">None yet.</div>';
+    ms.forEach(m => {
+      const d = document.createElement('div'); d.className = 'item';
+      d.innerHTML = '<span class="dot ' + (m.status === 'live' ? 'live' : '') + '"></span><div class="grow"><div class="t">' + esc(m.title) + '</div>' +
+        '<div class="s">' + (m.status === 'live' ? 'LIVE · ' + m.online + ' CONNECTED' : m.standing ? 'STANDING ROOM · WAITING' : esc(VM.fmtWhen(m.start))) +
+        ' · CODE ' + esc(m.code) + '</div></div><button class="btn big ' + (m.status === 'live' ? 'go' : '') + '">OPEN</button>';
+      d.querySelector('button').onclick = () => openConsole(m.id);
+      $('h-list').appendChild(d);
+    });
+  } catch (e) { $('h-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+}
+
+function instant() {
+  const now = new Date();
+  const d = VM.modal('<h3>INSTANT QR MEETING</h3>' +
+    '<label class="f" for="i-title">Title</label><input id="i-title" maxlength="120" value="' + esc('Meeting ' + now.toLocaleDateString(undefined, {month: 'short', day: 'numeric'}) + ' ' + now.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'})) + '">' +
+    '<label style="display:flex;align-items:center;margin-top:14px;font-size:13px"><input type="checkbox" id="i-standing">Standing room — keep the same QR code for every session (for a sign on the wall)</label>' +
+    '<label style="display:flex;align-items:center;margin-top:10px;font-size:13px"><input type="checkbox" id="i-onsite"' + (VM.config.onsiteReady ? ' checked' : '') + '>Only phones on the company Wi-Fi can join</label>' +
+    '<div class="err-text" id="i-err"></div>' +
+    '<div class="actions"><button class="btn big" data-close>CANCEL</button><button class="btn big go" id="i-go">START NOW</button></div>');
+  d.q('#i-go').onclick = async () => {
+    try {
+      const r = await VM.api('POST', 'meetings', {instant: true, title: d.q('#i-title').value,
+        standing: d.q('#i-standing').checked, onsite: d.q('#i-onsite').checked});
+      d.close();
+      await openConsole(r.meeting.id);
+      VM.share(meeting, m => { meeting = m; });
+    } catch (e) { d.q('#i-err').textContent = e.message; }
+  };
+}
+
+/* ---------- console ---------- */
+async function openConsole(mid) {
+  try { meeting = (await VM.api('GET', 'meetings/' + mid)).meeting; }
+  catch (e) { VM.toast(e.message); return home(); }
+  if (!meeting.canHost) { VM.toast('You are not a speaker in this meeting.'); return home(); }
+  history.replaceState(null, '', '/speak?m=' + mid);
+  $('page').hidden = true; $('console').hidden = false; document.body.classList.add('fixed');
+  $('c-title').textContent = meeting.title;
+  VM.fillLangs($('s-lang'), VM.me.lang);
+  $('s-mode').value = prefs.mode;
+  setupEngines();
+  hearButton(); trsButton();
+  P.lang = VM.me.lang;
+  resetFeed();
+  showState();
+  VM.Wake.on();
+  connect();
+}
+
+function showState() {
+  const live = meeting.status === 'live';
+  $('startbox').hidden = live;
+  $('mic-area').hidden = !live;
+  $('c-end').textContent = meeting.standing ? 'END SESSION' : 'END MEETING';
+  if (!live) {
+    $('start-hint').textContent = meeting.standing ? 'Standing room: listeners who scanned the QR code are waiting. Start a session when you are ready.'
+      : meeting.start ? 'Scheduled for ' + VM.fmtWhen(meeting.start) + '. Listeners who open it now wait until you start.' : 'Start when you are ready.';
+    setMeta('NOT STARTED', 'warn');
+  }
+}
+
+function connect() {
+  if (stream) stream.close();
+  stream = new VM.Stream(meeting.id, {lang: VM.me.lang, voice: prefs.hear ? '1' : '0'}, {
+    hello(d) { cid = d.cid; d.history.forEach(s => addPhrase(s, true)); },
+    seg(s) { addPhrase(s, false); },
+    audio(a) { P.audio(a.id, a.url); },
+    live(l) { if (l.speaker.id !== VM.me.id) showLive(l.speaker.name, l.text, l.lang); },
+    roster(r) {
+      others = r.people;
+      const byLang = {};
+      r.people.filter(p => p.cid !== cid).forEach(p => { byLang[p.lang] = (byLang[p.lang] || 0) + 1; });
+      const n = r.people.length - 1;
+      setMeta('LIVE · ' + n + ' LISTENING' + (n ? ' · ' + Object.entries(byLang).map(([k, v]) => VM.lang(k).tag + ' ' + v).join(' · ') : ''), 'live');
+      $('c-people').textContent = 'PEOPLE ' + Math.max(0, n);
+    },
+    status(s) {
+      if (s.status === 'live') { meeting.status = 'live'; showState(); stream.open(); }
+      else if (s.status === 'scheduled') { meeting.status = 'scheduled'; stopTalking(); showState(); }
+      else if (s.status === 'ended') { meeting.status = 'ended'; stopTalking(); setMeta('ENDED', ''); VM.toast('The meeting has ended.'); stream.close(); setTimeout(home, 1500); }
+    },
+    reconnecting() { setMeta('RECONNECTING…', 'warn'); },
+    closed() { setMeta('DISCONNECTED · RETRYING', 'err'); setTimeout(() => { if (stream && !stream.stopped) stream.open(); }, 4000); }
+  });
+  stream.open();
+}
+function setMeta(t, cls) { $('c-meta').textContent = t; $('c-dot').className = 'dot ' + (cls || ''); }
+
+$('c-start').onclick = async () => {
+  try {
+    meeting = (await VM.api('POST', 'meetings/' + meeting.id + '/start')).meeting;
+    showState(); connect();
+  } catch (e) { VM.toast(e.message); }
+};
+$('c-end').onclick = async () => {
+  const msg = meeting.standing ? 'End this session? The room’s QR code keeps working; listeners wait for the next session.'
+    : 'End the meeting for everyone?';
+  if (!(await VM.confirm(msg, meeting.standing ? 'END SESSION' : 'END MEETING', true))) return;
+  stopTalking();
+  try {
+    meeting = (await VM.api('POST', 'meetings/' + meeting.id + '/end')).meeting;
+    if (meeting.status === 'ended') { if (stream) stream.close(); VM.Wake.off(); home(); }
+    else { showState(); connect(); }
+  } catch (e) { VM.toast(e.message); }
+};
+$('c-back').onclick = () => {
+  stopTalking();
+  if (stream) { stream.close(); stream = null; }
+  if (cid) VM.api('POST', 'meetings/' + meeting.id + '/leave', {cid}).catch(() => {});
+  P.shutdown(); VM.Wake.off(); home();
+};
+$('c-share').onclick = () => VM.share(meeting, m => { meeting = m; });
+$('c-people').onclick = () => {
+  const list = others.filter(p => p.cid !== cid);
+  const d = VM.modal('<h3>CONNECTED (' + list.length + ')</h3><div class="list" id="pp"></div>' +
+    '<div class="actions"><button class="btn big go" data-close>DONE</button></div>');
+  if (!list.length) d.q('#pp').innerHTML = '<div class="empty">Nobody else yet. Share the QR code.</div>';
+  list.sort((a, b) => a.lang.localeCompare(b.lang)).forEach(p => {
+    const it = document.createElement('div'); it.className = 'item';
+    it.innerHTML = '<span class="chip on" style="--chip:' + VM.lang(p.lang).color + '">' + esc(VM.lang(p.lang).tag) + '</span>' +
+      '<div class="grow"><div class="t">' + esc(p.name) + '</div><div class="s">' + (p.guest ? 'GUEST' : p.role.toUpperCase()) + (p.voice ? ' · \u{1F50A}' : '') + '</div></div>' +
+      '<button class="btn">REMOVE</button>';
+    it.querySelector('button').onclick = async () => {
+      try { await VM.api('POST', 'meetings/' + meeting.id + '/kick', {cid: p.cid}); it.remove(); }
+      catch (e) { VM.toast(e.message); }
+    };
+    d.q('#pp').appendChild(it);
+  });
+};
+$('c-menu').onclick = () => {
+  const d = VM.modal('<h3>' + esc(meeting.title) + '</h3><div class="list">' +
+    '<a class="btn big" href="/api/meetings/' + encodeURIComponent(meeting.id) + '/transcript">DOWNLOAD TRANSCRIPT</a>' +
+    '<a class="btn big" href="/print?m=' + encodeURIComponent(meeting.id) + '" target="_blank" rel="noopener">PRINT QR SHEET</a>' +
+    '<button class="btn big" id="m-edit">EDIT MEETING</button>' +
+    '<a class="btn big" href="/listen" target="_blank" rel="noopener">OPEN THE LISTENER APP</a>' +
+    '</div><div class="actions"><button class="btn big go" data-close>DONE</button></div>');
+  d.q('#m-edit').onclick = () => { d.close(); VM.editMeeting(meeting, m => { meeting = m; $('c-title').textContent = m.title; showState(); }); };
+};
+
+/* ---------- feed ---------- */
+function resetFeed() {
+  shown = new Set();
+  $('feed').querySelectorAll('.phrase').forEach(n => n.remove());
+  $('feed-empty').hidden = false;
+  hideLive();
+}
+const atBottom = () => { const f = $('feed'); return f.scrollHeight - f.scrollTop - f.clientHeight < 80; };
+function addPhrase(s, replay) {
+  if (shown.has(s.id)) return;
+  shown.add(s.id);
+  const stick = atBottom();
+  $('feed-empty').hidden = true;
+  const mine = s.speaker.id === VM.me.id;
+  if (mine) hideLive(true); else if (liveFrom === s.speaker.name) hideLive();
+  const el = document.createElement('div');
+  el.className = 'phrase' + (mine ? ' mine' : '');
+  el.dataset.id = s.id;
+  el.style.setProperty('--accent', mine ? 'var(--green)' : VM.lang(VM.me.lang).color);
+  const tr = Object.entries(s.tr || {});
+  el.innerHTML = '<span class="who">' + (mine ? 'YOU' : esc(s.speaker.name.toUpperCase()) + ' · ' + esc(VM.lang(s.lang).tag)) +
+    (mine ? ' · ' + (tr.length ? 'TRANSLATED INTO ' + tr.map(([k]) => VM.lang(k).tag).join(' ') : 'NO OTHER LANGUAGES CONNECTED') : '') + '</span>' +
+    '<div class="txt">' + esc(mine ? s.src : (s.text || '⚠ translation unavailable')) + '</div>' +
+    (mine && prefs.trs && tr.length ? '<div class="trs">' + tr.map(([k, v]) => '<div><b>' + esc(VM.lang(k).tag) + '</b>' + esc(v || '⚠ unavailable') + '</div>').join('') + '</div>' : '');
+  $('feed').querySelectorAll('.phrase.last').forEach(n => n.classList.remove('last'));
+  el.classList.add('last');
+  $('feed').insertBefore(el, $('liveline'));
+  const all = $('feed').querySelectorAll('.phrase');
+  if (all.length > 200) all[0].remove();
+  if (stick) $('feed').scrollTop = $('feed').scrollHeight;
+  if (!replay && !mine && prefs.hear && !s.same) P.add(s);
+}
+let liveFrom = null;
+function showLive(who, text, lang) {
+  if (!text) { if (liveFrom === who) hideLive(); return; }
+  if (lang && lang !== VM.me.lang && who !== 'YOU') return;
+  const stick = atBottom();
+  liveFrom = who;
+  $('feed-empty').hidden = true;
+  $('liveline').style.setProperty('--accent', who === 'YOU' ? 'var(--green)' : VM.lang(VM.me.lang).color);
+  $('live-who').textContent = who.toUpperCase();
+  $('live-txt').textContent = text;
+  $('liveline').hidden = false;
+  if (stick) $('feed').scrollTop = $('feed').scrollHeight;
+}
+function hideLive(mineOnly) {
+  if (mineOnly && liveFrom !== 'YOU') return;
+  liveFrom = null; $('liveline').hidden = true; $('live-txt').textContent = '';
+}
+
+/* ---------- sending what was said ----------
+   Finished phrases go one at a time, in order. The words still being spoken go at most
+   twice a second, and carry a number so the server drops any that land after their phrase. */
+const Send = {
+  chain: Promise.resolve(), n: 0, pending: null, timer: null, busy: false,
+  path() { return 'meetings/' + meeting.id + '/speech'; },
+  lang() { return $('s-lang').value; },
+  final(text) {
+    this.pending = null;
+    const body = {text, final: true, lang: this.lang(), n: ++this.n};
+    this.chain = this.chain.then(() => VM.api('POST', this.path(), body)).catch(e => this.fail(e));
+  },
+  interim(text) {
+    this.pending = text;
+    if (this.timer) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      const t = this.pending;
+      if (!t || this.busy) return;
+      this.busy = true;
+      VM.api('POST', this.path(), {text: t, final: false, lang: this.lang(), n: ++this.n}).catch(() => {}).finally(() => { this.busy = false; });
+    }, 450);
+  },
+  fail(e) {
+    if (e.status === 409) { VM.toast('The meeting is not live. Start it first.'); stopTalking(); }
+    else VM.toast('Not sent: ' + e.message);
+  }
+};
+
+/* ---------- recognizers ---------- */
+const CJK = /^(zh|ja)$/;
+class DeviceRec {
+  /* The browser's recognizer only finishes a phrase at a pause. Someone who talks without
+     pausing would grow one endless phrase, so every 2 s anything but the last few words is
+     sent as finished (the VTRANSLATE segmenter). Chinese and Japanese count characters. */
+  constructor(langId, h) {
+    this.lang = langId; this.h = h; this.cjk = CJK.test(langId);
+    this.MIN = this.cjk ? 24 : 12; this.HOLD = this.cjk ? 6 : 4;
+  }
+  split(t) { return this.cjk ? Array.from(t.replace(/\s+/g, '')) : t.trim().split(/\s+/).filter(Boolean); }
+  join(a) { return a.join(this.cjk ? '' : ' '); }
+  start() {
+    this.running = true; this.committed = 0; this.words = [];
+    this.rec = this.build();
+    try { this.rec.start(); } catch (e) {}
+    this.seg = setInterval(() => this.check(), 2000);
+  }
+  build() {
+    const r = new SR();
+    r.lang = VM.lang(this.lang).sr; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
+    r.onresult = ev => {
+      let interim = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const res = ev.results[i];
+        if (res.isFinal) this.final(res[0].transcript); else interim += res[0].transcript;
+      }
+      if (interim) {
+        this.words = this.split(interim);
+        const tail = this.join(this.words.slice(this.committed));
+        if (tail) this.h.interim(tail);
+      }
+    };
+    r.onerror = ev => {
+      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { this.h.error('Microphone blocked. Allow the microphone for this site (iPhone: also Settings → General → Keyboard → Enable Dictation).'); }
+      else if (ev.error === 'language-not-supported') { this.h.error('This browser cannot recognize ' + VM.lang(this.lang).label + '. Choose the Google recognizer, or another device.'); }
+      else if (ev.error === 'network') { this.h.warn('Speech recognition lost the network; retrying.'); }
+    };
+    r.onend = () => {
+      this.committed = 0; this.words = [];
+      if (this.running) setTimeout(() => { if (this.running) { try { this.rec.start(); } catch (e) { this.rec = this.build(); try { this.rec.start(); } catch (x) {} } } }, 150);
+    };
+    return r;
+  }
+  check() {
+    const tail = this.words.slice(this.committed);
+    if (tail.length < this.MIN) return;
+    const head = tail.slice(0, tail.length - this.HOLD);
+    this.committed += head.length;
+    this.h.commit(this.join(head));
+  }
+  final(text) {
+    const rest = this.join(this.split(text).slice(this.committed));
+    this.committed = 0; this.words = [];
+    if (rest) this.h.commit(rest);
+  }
+  stop() {
+    this.running = false;
+    clearInterval(this.seg);
+    const tail = this.join(this.words.slice(this.committed));
+    this.committed = 0; this.words = [];
+    if (tail) this.h.commit(tail);       // what was still on screen is sent, then the rest dropped:
+    try { this.rec.abort(); } catch (e) {}   // abort, not stop, so no duplicate final arrives
+  }
+}
+
+class ServerRec {
+  /* Google Speech-to-Text through the server: works in every browser and with any microphone
+     (a headset, a lapel mic on a USB adapter). The phone cuts the audio into phrases at pauses
+     (simple voice-activity detection), 16 kHz mono, and sends each one as it ends. */
+  constructor(langId, deviceId, h) { this.lang = langId; this.deviceId = deviceId; this.h = h; this.queue = Promise.resolve(); }
+  async start() {
+    this.running = true;
+    this.stream = await navigator.mediaDevices.getUserMedia({audio: {deviceId: this.deviceId ? {exact: this.deviceId} : undefined,
+      echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1}});
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    this.ctx = new Ctx();
+    const src = this.ctx.createMediaStreamSource(this.stream);
+    this.proc = this.ctx.createScriptProcessor(4096, 1, 1);
+    src.connect(this.proc); this.proc.connect(this.ctx.destination);
+    this.ratio = this.ctx.sampleRate / 16000;
+    this.frameMs = 4096 / this.ctx.sampleRate * 1000;
+    this.noise = 0.008; this.speaking = false; this.chunks = []; this.pre = []; this.silent = 0; this.voiced = 0;
+    this.proc.onaudioprocess = e => this.frame(e.inputBuffer.getChannelData(0));
+  }
+  frame(x) {
+    if (!this.running) return;
+    const n = Math.floor(x.length / this.ratio), out = new Int16Array(n);
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      const a = Math.floor(i * this.ratio), b = Math.min(x.length, Math.floor((i + 1) * this.ratio));
+      let v = 0; for (let j = a; j < b; j++) v += x[j];
+      v /= Math.max(1, b - a); sum += v * v;
+      out[i] = Math.max(-32768, Math.min(32767, v * 32767));
+    }
+    const rms = Math.sqrt(sum / Math.max(1, n));
+    this.h.level(rms);
+    const thr = Math.max(0.012, this.noise * 2.6);
+    if (rms > thr) {
+      if (!this.speaking) { this.speaking = true; this.chunks = this.pre.slice(); this.voiced = 0; }
+      this.chunks.push(out); this.silent = 0; this.voiced += this.frameMs;
+    } else {
+      this.noise = this.noise * 0.95 + rms * 0.05;
+      if (this.speaking) {
+        this.chunks.push(out); this.silent += this.frameMs;
+        if (this.silent >= 650) this.cut();
+      } else { this.pre.push(out); if (this.pre.length > 3) this.pre.shift(); }
+    }
+    if (this.speaking && this.chunks.length * this.frameMs >= 12000) this.cut();
+  }
+  cut() {
+    const chunks = this.chunks, voiced = this.voiced;
+    this.speaking = false; this.chunks = []; this.silent = 0; this.voiced = 0; this.pre = [];
+    if (voiced < 250) return;
+    const len = chunks.reduce((s, c) => s + c.length, 0), pcm = new Int16Array(len);
+    let o = 0; chunks.forEach(c => { pcm.set(c, o); o += c.length; });
+    this.h.interim('…');
+    this.queue = this.queue.then(() => VM.api('POST', 'meetings/' + meeting.id + '/audio?lang=' + encodeURIComponent(this.lang), pcm.buffer))
+      .then(r => { if (!r.text) this.h.interim(''); })
+      .catch(e => { this.h.interim(''); this.h.warn(e.message); });
+  }
+  stop() {
+    if (this.speaking) this.cut();
+    this.running = false;
+    try { this.proc.disconnect(); } catch (e) {}
+    if (this.stream) this.stream.getTracks().forEach(t => t.stop());
+    if (this.ctx) this.ctx.close().catch(() => {});
+    this.h.level(0);
+  }
+}
+
+function setupEngines() {
+  const sel = $('s-engine'), canServer = VM.config.serverStt;
+  const opts = [];
+  if (SR) opts.push(['device', 'THIS DEVICE’S RECOGNIZER']);
+  if (canServer) opts.push(['server', 'GOOGLE RECOGNIZER (ANY MIC)']);
+  sel.innerHTML = opts.map(([v, l]) => '<option value="' + v + '">' + l + '</option>').join('');
+  if (!opts.some(o => o[0] === prefs.engine)) prefs.engine = opts.length ? opts[0][0] : '';
+  sel.value = prefs.engine;
+  sel.hidden = opts.length < 2;
+  if (!opts.length) {
+    $('mic').disabled = true;
+    $('mic-label').textContent = 'NOT AVAILABLE';
+    VM.toast('This browser has no speech recognition. Use Chrome, Edge or Safari, or ask your admin to turn on the Google recognizer.', 9000);
+  }
+  micList();
+}
+async function micList() {
+  const show = prefs.engine === 'server';
+  $('s-mic').hidden = !show; $('meter').hidden = !show;
+  if (!show || !navigator.mediaDevices) return;
+  try {
+    const ins = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput');
+    $('s-mic').innerHTML = '<option value="">DEFAULT MIC</option>' + ins.filter(d => d.deviceId && d.deviceId !== 'default')
+      .map((d, i) => '<option value="' + esc(d.deviceId) + '">' + esc((d.label || 'Microphone ' + (i + 1)).toUpperCase()) + '</option>').join('');
+    $('s-mic').value = prefs.mic || '';
+  } catch (e) {}
+}
+$('s-engine').onchange = e => { prefs.engine = e.target.value; savePrefs(); stopTalking(); micList(); };
+$('s-mic').onchange = e => { prefs.mic = e.target.value; savePrefs(); if (talking) { stopTalking(); startTalking(); } };
+$('s-mode').onchange = e => { prefs.mode = e.target.value; savePrefs(); stopTalking(); micLabel(); };
+$('s-lang').onchange = async e => {
+  stopTalking();
+  try { VM.me = (await VM.api('PUT', 'me', {lang: e.target.value})).me; } catch (x) {}
+  P.lang = VM.me.lang;
+  if (stream) stream.lastId = 0;
+  resetFeed(); connect();
+};
+
+const handlers = {
+  interim(t) { if (t) { showLive('YOU', t); Send.interim(t); } else hideLive(true); },
+  commit(t) { Send.final(t); },
+  level(v) { $('meter-i').style.width = Math.min(100, v * 600) + '%'; },
+  warn(m) { VM.toast(m); },
+  error(m) { VM.toast(m, 9000); stopTalking(); }
+};
+
+async function startTalking() {
+  if (talking || meeting.status !== 'live') return;
+  talking = true;
+  P.suspend(true);                       // never play other voices into an open mic
+  const lang = $('s-lang').value;
+  try {
+    if (prefs.engine === 'server') { rec = new ServerRec(lang, prefs.mic, handlers); await rec.start(); micList(); }
+    else { rec = new DeviceRec(lang, handlers); rec.start(); }
+  } catch (e) {
+    talking = false; rec = null; P.suspend(false);
+    VM.toast('Microphone unavailable: ' + (e.message || e.name), 8000);
+  }
+  micLabel();
+}
+function stopTalking() {
+  if (!talking) return;
+  talking = false;
+  const r = rec; rec = null;
+  if (meeting.status === 'live') {
+    if (r) { try { r.stop(); } catch (e) {} }   // sends what was still being said
+    Send.final('');                      // and clears the live line for everyone
+  } else if (r) { r.h = Object.assign({}, r.h, {commit() {}, interim() {}}); try { r.stop(); } catch (e) {} }
+  hideLive(true);
+  P.suspend(false);
+  micLabel();
+}
+function micLabel(text) {
+  const b = $('mic');
+  b.classList.toggle('on', talking);
+  b.setAttribute('aria-pressed', talking ? 'true' : 'false');
+  $('mic-label').textContent = text || (talking
+    ? ({lock: 'LIVE · HOLD TO STOP', tap: 'LIVE · TAP TO STOP', hold: 'RELEASE TO STOP'})[prefs.mode]
+    : ({lock: 'TAP TO START', tap: 'TAP TO START', hold: 'HOLD TO TALK'})[prefs.mode]);
+}
+/* Default mode (lock): a tap starts; stopping takes a deliberate 1.5 s press with a ring
+   filling around the button, so a phone going into a pocket or holster never cuts the
+   speaker off. Letting go early cancels. */
+const HOLD_MS = 1500;
+let holdTimer = null, ignoreClick = false;
+$('mic').style.setProperty('--hold', HOLD_MS + 'ms');
+function holdCancel() {
+  if (!holdTimer) return;
+  clearTimeout(holdTimer); holdTimer = null;
+  $('mic').classList.remove('holding');
+  micLabel();
+}
+$('mic').addEventListener('click', () => {
+  if (ignoreClick) return;
+  if (prefs.mode === 'tap') { talking ? stopTalking() : startTalking(); return; }
+  if (prefs.mode === 'lock' && !talking) startTalking();
+});
+$('mic').addEventListener('pointerdown', e => {
+  if (prefs.mode === 'hold') { e.preventDefault(); $('mic').setPointerCapture(e.pointerId); startTalking(); return; }
+  if (prefs.mode === 'lock' && talking) {
+    e.preventDefault();
+    try { $('mic').setPointerCapture(e.pointerId); } catch (x) {}
+    $('mic').classList.add('holding');
+    micLabel('KEEP HOLDING…');
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      $('mic').classList.remove('holding');
+      ignoreClick = true; setTimeout(() => { ignoreClick = false; }, 600);   // the release must not start it again
+      if (navigator.vibrate) navigator.vibrate(80);
+      stopTalking();
+    }, HOLD_MS);
+  }
+});
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => $('mic').addEventListener(t, () => {
+  if (prefs.mode === 'hold') stopTalking(); else holdCancel();
+}));
+$('mic').addEventListener('contextmenu', e => e.preventDefault());
+
+function hearButton() { $('s-hear').textContent = 'HEAR OTHERS: ' + (prefs.hear ? 'ON' : 'OFF'); $('s-hear').classList.toggle('on', prefs.hear); }
+function trsButton() { $('s-trs').textContent = 'SHOW TRANSLATIONS: ' + (prefs.trs ? 'ON' : 'OFF'); }
+$('s-hear').onclick = () => {
+  prefs.hear = !prefs.hear; savePrefs(); hearButton();
+  if (prefs.hear) P.unlock();
+  P.setEnabled(prefs.hear);
+  if (cid) VM.api('POST', 'meetings/' + meeting.id + '/prefs', {cid, voice: prefs.hear}).catch(() => {});
+};
+$('s-trs').onclick = () => { prefs.trs = !prefs.trs; savePrefs(); trsButton(); };
+P.setEnabled(prefs.hear);
+
+init();
+</script>
+</body>
+</html>

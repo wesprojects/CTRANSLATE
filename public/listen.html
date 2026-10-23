@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<!-- CTRANSLATE LISTEN - hear a meeting in your own language. Build: server.py BUILD_VERSION.
+     First open: choose a language (every word after that is in it). A meeting QR code
+     opens /j/<code> -> /listen?code=<code>: one tap on LISTEN, no name, no sign-up. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#151922">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Listen">
+<link rel="manifest" href="/apps/listen.webmanifest">
+<link rel="apple-touch-icon" href="/apps/listen-180.png">
+<link rel="icon" href="/apps/listen-192.png">
+<title>CTRANSLATE Listen</title>
+<link rel="stylesheet" href="/app.css?v=__BUILD__">
+<style>
+  .langs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:12px}
+  .langbtn{background:var(--panel2);border:2px solid var(--line);border-radius:12px;color:var(--ink);font:600 20px/1.2 var(--mono);
+    padding:22px 12px;cursor:pointer;text-align:center;touch-action:manipulation}
+  .langbtn small{display:block;font-size:10px;letter-spacing:.16em;color:var(--mute);margin-top:6px}
+  .langbtn.suggest{border-color:var(--c,var(--blue))}
+  .langbtn:active{background:var(--c,var(--blue));color:#131313}
+  .choose-title{font-size:15px;line-height:1.6;margin:0}
+  .bigplay{width:100%;min-height:92px;font-size:26px;letter-spacing:.14em;border-radius:14px;margin-top:18px}
+  .mtitle{font-size:22px;font-weight:700;line-height:1.3}
+  .langlink{background:none;border:0;color:var(--blue);font:13px var(--mono);cursor:pointer;padding:8px 0;text-decoration:underline}
+</style>
+</head>
+<body>
+<header>
+  <div><h1><a href="/">CTRANSLATE</a></h1><div class="build" id="buildStamp"></div></div>
+  <div class="spacer"></div>
+  <div class="who" id="who"></div>
+  <button class="btn" id="signout" hidden>SIGN OUT</button>
+  <div class="brand" title="Conklin Office Furniture — Research and Development">
+    <img src="/brand.png" alt="CONKLIN OFFICE FURNITURE" style="width:107px;height:24px;display:block">
+    <svg width="107" height="9" viewBox="0 0 107 9" style="display:block;margin-top:1px"><text x="0" y="8" textLength="107" lengthAdjust="spacingAndGlyphs" font-family="'DM Mono','SF Mono',ui-monospace,Menlo,Consolas,monospace" font-size="7.5" font-weight="700" fill="#f5a524">RESEARCH AND DEVELOPMENT</text></svg>
+  </div>
+</header>
+
+<main class="page" id="page"><div class="empty">Loading…</div></main>
+
+<section id="room" hidden style="flex:1 1 auto;min-height:0;display:flex;flex-direction:column">
+  <div class="topline">
+    <button class="btn big" id="leave">LEAVE</button>
+    <div style="flex:1;min-width:0">
+      <div class="title" id="r-title"></div>
+      <div class="meta"><span class="dot" id="r-dot"></span> <span id="r-meta"></span></div>
+    </div>
+  </div>
+  <div class="feed" id="feed" aria-live="polite">
+    <div class="empty" id="feed-empty"></div>
+    <div class="live-line" id="liveline" hidden><span class="who" id="live-who"></span><span class="txt" id="live-txt"></span></div>
+  </div>
+  <div class="bar">
+    <button class="btn big" id="b-voice" aria-pressed="true"></button>
+    <button class="btn big" id="b-smaller" aria-label="A-">A&minus;</button>
+    <button class="btn big" id="b-bigger" aria-label="A+">A+</button>
+    <select id="b-lang" style="width:auto;flex:1;min-width:120px"></select>
+    <button class="btn big" id="b-more"></button>
+  </div>
+</section>
+
+<div class="overlay" id="ov" hidden><div class="msg" id="ov-msg"></div><div class="row" id="ov-actions" style="justify-content:center"></div></div>
+
+<script src="/i18n.js?v=__BUILD__"></script>
+<script src="/app.js?v=__BUILD__"></script>
+<script>
+"use strict";
+const $ = VM.$, esc = VM.esc;
+const P = new VM.Player();
+const params = new URLSearchParams(location.search);
+let prefs = Object.assign({voice: true, rate: 1, scale: 1, orig: false, hearSame: false}, VM.store.get('listen', {}));
+let stream = null, meeting = null, cid = null, myLang = 'en', shown = new Set(), live = null, waiting = false;
+const savePrefs = () => VM.store.set('listen', prefs);
+const T = k => VMT(myLang, k);
+const enabled = () => VM.config.languages.map(l => l.id);
+
+/* ---------- start: language first ---------- */
+async function init() {
+  try { await VM.load(); }
+  catch (e) { $('page').innerHTML = '<div class="card"><h2>Not connected</h2><p>' + esc(e.message) + '</p><button class="btn big" onclick="location.reload()">↻</button></div>'; return; }
+  VM.header('LISTEN'); VM.watchBuild(); VM.registerApp('listen');
+  applyScale();
+  const chosen = VM.store.get('lang', null);
+  if (chosen && enabled().includes(chosen)) { myLang = chosen; route(); }
+  else showPicker(route);
+}
+
+function route() {
+  document.documentElement.lang = myLang;
+  const code = params.get('code');
+  if (code) return byCode(code);
+  if (VM.me && VM.me.kind === 'guest') return openMeeting(VM.me.meeting);
+  if (VM.me) return showHome();
+  showNoCode();
+}
+
+/* Big native-name buttons; the phone's own language is outlined. The title is
+   written in every offered language, since we don't know which one they read. */
+function showPicker(next) {
+  const phone = (navigator.language || 'en').slice(0, 2).toLowerCase();
+  const langs = VM.config.languages;
+  const titles = langs.map(l => VMT(l.id, 'choose')).filter((t, i, a) => a.indexOf(t) === i);
+  $('page').innerHTML = '<div class="card"><p class="choose-title">' + titles.map(esc).join('<br>') + '</p><div class="langs" id="langs"></div></div>';
+  langs.forEach(l => {
+    const b = document.createElement('button');
+    b.className = 'langbtn' + (l.id === phone || l.mt.slice(0, 2) === phone ? ' suggest' : '');
+    b.style.setProperty('--c', l.color);
+    b.innerHTML = esc(l.label) + '<small>' + esc(l.tag) + '</small>';
+    b.onclick = async () => {
+      myLang = l.id;
+      VM.store.set('lang', myLang);
+      if (VM.me && VM.me.kind === 'user' && VM.me.lang !== myLang) { try { VM.me = (await VM.api('PUT', 'me', {lang: myLang})).me; } catch (e) {} }
+      next();
+    };
+    $('langs').appendChild(b);
+  });
+}
+function langLink() {
+  return '<button class="langlink" id="chg-lang">' + esc(T('lang')) + ': ' + esc(VM.lang(myLang).label) + ' ▾</button>';
+}
+function wireLangLink(back) { const b = $('chg-lang'); if (b) b.onclick = () => showPicker(back); }
+
+function showNoCode() {
+  $('page').innerHTML = '<div class="card"><p style="font-size:15px">' + esc(T('enterCode')) + '</p>' +
+    '<div class="row"><input id="code" class="grow" placeholder="ABC234" autocapitalize="characters" maxlength="8" style="text-transform:uppercase;letter-spacing:.2em;font-size:20px"><button class="btn big go" id="code-go">' + esc(T('next')) + '</button></div>' +
+    '<div class="err-text" id="code-err"></div>' + langLink() + '</div><div id="si"></div>' +
+    '<p style="text-align:center"><button class="langlink" id="staff">' + esc(T('staff')) + '</button></p>';
+  wireLangLink(showNoCode);
+  $('code-go').onclick = () => { const v = $('code').value.trim(); if (v) { history.replaceState(null, '', '/listen?code=' + encodeURIComponent(v.toUpperCase())); byCode(v); } };
+  $('staff').onclick = () => { $('staff').hidden = true; VM.signIn($('si'), {title: T('staff'), done: () => { VM.header('LISTEN'); showHome(); }}); };
+}
+
+/* ---------- a meeting code (QR) ---------- */
+async function byCode(code) {
+  code = code.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  let info;
+  try { info = await VM.api('GET', 'code/' + code); }
+  catch (e) {
+    $('page').innerHTML = '<div class="card"><div class="code-big">' + esc(code) + '</div><p style="font-size:15px">' + esc(e.message) + '</p>' +
+      '<button class="btn big" id="again">' + esc(T('next')) + '</button></div>';
+    $('again').onclick = () => { history.replaceState(null, '', '/listen'); params.delete('code'); route(); };
+    return;
+  }
+  const signedIn = VM.me && VM.me.kind === 'user';
+  const mineAsGuest = VM.me && VM.me.kind === 'guest' && VM.me.meeting === info.id;
+  const canTap = signedIn || mineAsGuest || info.guests;
+  if (info.offsite && !signedIn) {
+    $('page').innerHTML = '<div class="card"><div class="mtitle">' + esc(info.title) + '</div><p style="font-size:17px">\u{1F4F6} ' + esc(T('wifi')) + '</p>' +
+      '<button class="btn big go" id="again">\u21bb</button>' + langLink() + '</div>';
+    wireLangLink(() => byCode(code));
+    $('again').onclick = () => byCode(code);
+    return;
+  }
+  $('page').innerHTML = '<div class="card"><div class="hint">' + (info.status === 'live' ? '<span class="dot live"></span> ' + esc(T('live')) : esc(T('startsAt')) + ' ' + esc(VM.fmtWhen(info.start))) + '</div>' +
+    '<div class="mtitle">' + esc(info.title) + '</div>' +
+    (canTap ? '<button class="btn go bigplay" id="play">▶ ' + esc(T('listen')) + '</button><p style="font-size:14px;line-height:1.5">' + esc(T('listenHint')) + '</p>' : '') +
+    '<div class="err-text" id="p-err"></div>' + langLink() + '</div><div id="si"></div>' +
+    (!signedIn ? '<p style="text-align:center"><button class="langlink" id="staff">' + esc(T('staff')) + '</button></p>' : '');
+  wireLangLink(() => byCode(code));
+  const staff = $('staff');
+  const signIn = () => VM.signIn($('si'), {title: T('staff'), done: () => { VM.header('LISTEN'); byCode(code); }});
+  if (staff) staff.onclick = () => { staff.hidden = true; signIn(); };
+  if (!canTap) { if (staff) staff.hidden = true; signIn(); return; }
+  $('play').onclick = async () => {
+    P.unlock();                           // must run inside the tap (iPhone)
+    $('play').disabled = true;
+    try {
+      if (!signedIn && !mineAsGuest) {
+        const r = await VM.api('POST', 'guest', {code, lang: myLang});
+        VM.me = r.me; VM.header('LISTEN');
+      } else if (mineAsGuest && VM.me.lang !== myLang) {
+        VM.me = (await VM.api('PUT', 'me', {lang: myLang})).me;
+      }
+      await openMeeting(info.id, true);
+    } catch (e) { $('p-err').textContent = e.message; $('play').disabled = false; }
+  };
+}
+
+/* ---------- signed-in staff: their meetings ---------- */
+async function showHome() {
+  history.replaceState(null, '', '/listen');
+  const p = $('page');
+  p.innerHTML = '<div class="card"><h2>' + esc(T('lang')) + '</h2><select id="h-lang"></select></div>' +
+    '<div class="card"><h2>Meetings</h2><div class="list" id="h-list"><div class="empty">…</div></div></div>' +
+    '<div class="card"><p>' + esc(T('enterCode')) + '</p><div class="row"><input id="code" class="grow" placeholder="ABC234" autocapitalize="characters" maxlength="8" style="text-transform:uppercase;letter-spacing:.2em"><button class="btn big go" id="code-go">' + esc(T('next')) + '</button></div></div>' +
+    (VM.me.role !== 'listener' ? '<p class="hint">Speaking in a meeting? Open <a href="/speak">CTRANSLATE Speak</a>.</p>' : '');
+  VM.fillLangs($('h-lang'), myLang);
+  $('h-lang').onchange = async e => {
+    myLang = e.target.value; VM.store.set('lang', myLang);
+    try { VM.me = (await VM.api('PUT', 'me', {lang: myLang})).me; } catch (x) {}
+    showHome();
+  };
+  $('code-go').onclick = () => { const v = $('code').value.trim(); if (v) byCode(v); };
+  try {
+    const ms = (await VM.api('GET', 'meetings')).meetings.filter(m => m.status !== 'ended' && m.canJoin);
+    $('h-list').innerHTML = ms.length ? '' : '<div class="empty">No meetings for you right now.</div>';
+    ms.forEach(m => {
+      const d = document.createElement('div'); d.className = 'item';
+      d.innerHTML = '<span class="dot ' + (m.status === 'live' ? 'live' : '') + '"></span><div class="grow"><div class="t">' + esc(m.title) + '</div>' +
+        '<div class="s">' + (m.status === 'live' ? esc(T('live')) + ' · ' + m.online : esc(VM.fmtWhen(m.start))) + ' · ' + m.hosts.map(h => esc(h.name)).join(', ') + '</div></div>' +
+        '<button class="btn big ' + (m.status === 'live' ? 'go' : '') + '">▶ ' + esc(T('listen')) + '</button>';
+      d.querySelector('button').onclick = () => { P.unlock(); openMeeting(m.id, true); };
+      $('h-list').appendChild(d);
+    });
+  } catch (e) { $('h-list').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; }
+}
+
+/* Opening a meeting needs a tap first (audio on iPhone). tapped=false: show the button. */
+async function openMeeting(mid, tapped) {
+  try { meeting = (await VM.api('GET', 'meetings/' + mid)).meeting; }
+  catch (e) {
+    if (e.status === 401) { VM.me = null; return route(); }
+    $('page').innerHTML = '<div class="card"><p>' + esc(e.message) + '</p><a class="btn big" href="/listen">' + esc(T('done')) + '</a></div>';
+    return;
+  }
+  if (meeting.status === 'ended') {
+    $('page').innerHTML = '<div class="card"><div class="mtitle">' + esc(meeting.title) + '</div><p style="font-size:15px">' + esc(T('ended')) + '</p></div>';
+    return;
+  }
+  if (!tapped) {
+    $('page').innerHTML = '<div class="card"><div class="mtitle">' + esc(meeting.title) + '</div>' +
+      '<button class="btn go bigplay" id="play">▶ ' + esc(T('listen')) + '</button><p style="font-size:14px">' + esc(T('listenHint')) + '</p>' + langLink() + '</div>';
+    wireLangLink(() => openMeeting(mid, false));
+    $('play').onclick = async () => {
+      P.unlock();
+      if (VM.me.lang !== myLang) { try { VM.me = (await VM.api('PUT', 'me', {lang: myLang})).me; } catch (e) {} }
+      enterRoom();
+    };
+    return;
+  }
+  enterRoom();
+}
+
+/* ---------- in the meeting ---------- */
+function labels() {
+  $('leave').textContent = T('leave');
+  $('b-more').textContent = T('more');
+  $('feed-empty').textContent = T('here');
+  voiceButton();
+}
+function enterRoom() {
+  $('page').hidden = true; $('room').hidden = false; document.body.classList.add('fixed');
+  $('r-title').textContent = meeting.title;
+  VM.fillLangs($('b-lang'), myLang);
+  labels();
+  P.lang = myLang;
+  P.deviceVoice = VM.config.ttsEngine !== 'off';
+  P.rate = prefs.rate;
+  P.setEnabled(prefs.voice && VM.config.ttsEngine !== 'off');
+  $('b-voice').hidden = VM.config.ttsEngine === 'off';
+  P.onspeak = id => {
+    document.querySelectorAll('.phrase.speaking').forEach(n => n.classList.remove('speaking'));
+    const n = id && document.querySelector('.phrase[data-id="' + id + '"]');
+    if (n) n.classList.add('speaking');
+  };
+  VM.mediaSession(meeting.title, 'CTRANSLATE · ' + VM.lang(myLang).label, on => { prefs.voice = on; savePrefs(); P.setEnabled(on); voiceButton(); });
+  VM.Wake.on();
+  resetFeed();
+  openStream();
+}
+
+function openStream() {
+  if (stream) stream.close();
+  setConn('…', '');
+  stream = new VM.Stream(meeting.id, {lang: myLang, voice: prefs.voice ? '1' : '0'}, {
+    hello(d) {
+      cid = d.cid; waiting = false; hideOverlay();
+      d.history.forEach(s => addPhrase(s, true));
+      setConn(T('live'), 'live');
+    },
+    seg(s) { addPhrase(s, false); },
+    audio(a) { P.audio(a.id, a.url); },
+    live(l) { showLive(l); },
+    roster(r) { setConn(T('live') + ' · ' + r.people.length + ' \u{1F464}', 'live'); },
+    status(s) {
+      if (s.status === 'scheduled') { waiting = true; hideLive(); setConn('⏸', 'warn'); overlay(T('waiting'), [[T('leave'), leave]]); }
+      else if (s.status === 'live' && waiting) { waiting = false; hideOverlay(); stream.open(); }
+      else if (s.status === 'ended') ended();
+    },
+    kicked(k) { stream.close(); P.shutdown(); VM.Wake.off(); overlay(k && k.reason === 'code' ? T('newcode') : T('removed'), [[T('done'), () => location.href = '/listen']]); },
+    reconnecting() { setConn(T('reconnecting'), 'warn'); },
+    async closed() {
+      try {
+        const m = (await VM.api('GET', 'meetings/' + meeting.id)).meeting;
+        if (m.status === 'ended') return ended();
+      } catch (e) {
+        if (e.status === 401 || e.status === 403 || e.status === 404) { stream.close(); P.shutdown(); VM.Wake.off(); return overlay(T('newcode'), [[T('done'), () => location.href = '/listen']]); }
+      }
+      setConn(T('reconnecting'), 'err');
+      setTimeout(() => { if (stream && !stream.stopped) stream.open(); }, 4000);
+    }
+  });
+  stream.open();
+}
+
+function ended() {
+  if (stream) stream.close();
+  P.shutdown(); VM.Wake.off(); hideLive();
+  setConn('■', '');
+  overlay(T('ended'), [[T('done'), leave]]);
+}
+
+async function leave() {
+  if (stream) { stream.close(); stream = null; }
+  if (cid && meeting) VM.api('POST', 'meetings/' + meeting.id + '/leave', {cid}).catch(() => {});
+  cid = null;
+  P.shutdown(); VM.Wake.off(); hideOverlay();
+  $('room').hidden = true; $('page').hidden = false; document.body.classList.remove('fixed');
+  if (VM.me && VM.me.kind === 'user') showHome();
+  else if (VM.me && VM.me.kind === 'guest') openMeeting(VM.me.meeting, false);
+  else route();
+}
+$('leave').onclick = leave;
+
+function setConn(txt, cls) { $('r-meta').textContent = txt; $('r-dot').className = 'dot ' + (cls || ''); }
+function overlay(msg, actions) {
+  $('ov-msg').textContent = msg;
+  $('ov-actions').innerHTML = '';
+  actions.forEach(([label, fn]) => { const b = document.createElement('button'); b.className = 'btn big'; b.textContent = label; b.onclick = fn; $('ov-actions').appendChild(b); });
+  $('ov').hidden = false;
+}
+function hideOverlay() { $('ov').hidden = true; }
+
+/* ---------- captions ---------- */
+function resetFeed() {
+  shown = new Set();
+  $('feed').querySelectorAll('.phrase').forEach(n => n.remove());
+  $('feed-empty').hidden = false;
+  hideLive();
+}
+const atBottom = () => { const f = $('feed'); return f.scrollHeight - f.scrollTop - f.clientHeight < 80; };
+function addPhrase(s, replay) {
+  if (shown.has(s.id)) return;
+  shown.add(s.id);
+  const stick = atBottom();
+  $('feed-empty').hidden = true;
+  if (live && live.speaker.id === s.speaker.id) hideLive();
+  const el = document.createElement('div');
+  el.className = 'phrase' + (s.same ? ' same' : '') + (!s.text ? ' failed' : '');
+  el.dataset.id = s.id;
+  el.style.setProperty('--accent', VM.lang(myLang).color);
+  el.innerHTML = '<span class="who">' + esc(s.speaker.name.toUpperCase()) + '</span>' +
+    '<div class="txt">' + esc(s.text || '⚠ ' + T('unavailable')) + '</div>' +
+    (prefs.orig && !s.same ? '<div class="orig">' + esc(VM.lang(s.lang).tag + ': ' + s.src) + '</div>' : '');
+  $('feed').querySelectorAll('.phrase.last').forEach(n => n.classList.remove('last'));
+  el.classList.add('last');
+  $('feed').insertBefore(el, $('liveline'));
+  const all = $('feed').querySelectorAll('.phrase');
+  if (all.length > 200) all[0].remove();
+  if (stick) $('feed').scrollTop = $('feed').scrollHeight;
+  if (!replay && (!s.same || prefs.hearSame)) P.add(s.same ? Object.assign({}, s, {audio: null, text: s.src}) : s);
+}
+function showLive(l) {
+  if (!l.text) { if (!live || live.speaker.id === l.speaker.id) hideLive(); return; }
+  if (l.lang && l.lang !== myLang) return;
+  const stick = atBottom();
+  live = l;
+  $('feed-empty').hidden = true;
+  $('liveline').style.setProperty('--accent', VM.lang(myLang).color);
+  $('live-who').textContent = l.speaker.name.toUpperCase();
+  $('live-txt').textContent = l.text;
+  $('liveline').hidden = false;
+  if (stick) $('feed').scrollTop = $('feed').scrollHeight;
+}
+function hideLive() { live = null; $('liveline').hidden = true; $('live-txt').textContent = ''; }
+
+/* ---------- controls ---------- */
+function voiceButton() {
+  const b = $('b-voice');
+  b.textContent = prefs.voice ? '\u{1F50A} ' + T('voiceOn') : '\u{1F507} ' + T('voiceOff');
+  b.classList.toggle('on', prefs.voice);
+  b.setAttribute('aria-pressed', prefs.voice ? 'true' : 'false');
+}
+$('b-voice').onclick = () => {
+  prefs.voice = !prefs.voice; savePrefs();
+  if (prefs.voice) P.unlock();
+  P.setEnabled(prefs.voice); voiceButton();
+  if (cid) VM.api('POST', 'meetings/' + meeting.id + '/prefs', {cid, voice: prefs.voice}).catch(() => {});
+};
+function applyScale() { prefs.scale = Math.min(2.2, Math.max(0.6, prefs.scale)); document.documentElement.style.setProperty('--scale', prefs.scale); savePrefs(); }
+$('b-bigger').onclick = () => { prefs.scale += 0.12; applyScale(); };
+$('b-smaller').onclick = () => { prefs.scale -= 0.12; applyScale(); };
+$('b-lang').onchange = async e => {
+  myLang = e.target.value; VM.store.set('lang', myLang);
+  try { VM.me = (await VM.api('PUT', 'me', {lang: myLang})).me; } catch (x) {}
+  P.stopAll(); P.lang = myLang;
+  labels();
+  if (stream) stream.lastId = 0;
+  resetFeed(); openStream();
+};
+$('b-more').onclick = async () => {
+  let outs = [];
+  if (VM.canPickOutput() && navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+    try { outs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput' && d.label); } catch (e) {}
+  }
+  const d = VM.modal('<h3>' + esc(T('more')) + '</h3>' +
+    (VM.config.ttsEngine !== 'off' ?
+      '<label class="f" for="o-rate">' + esc(T('speed')) + ' <span id="o-rate-v"></span></label><input id="o-rate" type="range" min="0.8" max="1.6" step="0.05" value="' + prefs.rate + '">' : '') +
+    (outs.length ? '<label class="f" for="o-out">\u{1F3A7}</label><select id="o-out"><option value="">Default</option>' +
+      outs.map(o => '<option value="' + esc(o.deviceId) + '">' + esc(o.label) + '</option>').join('') + '</select>' : '') +
+    '<label style="display:flex;align-items:center;margin-top:14px;font-size:14px"><input type="checkbox" id="o-orig"' + (prefs.orig ? ' checked' : '') + '>' + esc(T('orig')) + '</label>' +
+    (VM.config.ttsEngine !== 'off' ? '<label style="display:flex;align-items:center;margin-top:10px;font-size:13px"><input type="checkbox" id="o-same"' + (prefs.hearSame ? ' checked' : '') + '>\u{1F50A} ' + esc(VM.lang(myLang).label) + ' → ' + esc(VM.lang(myLang).label) + '</label>' : '') +
+    '<p class="hint">' + esc(T('keepOpen')) + '</p>' +
+    '<div class="actions"><button class="btn big go" data-close>' + esc(T('done')) + '</button></div>');
+  const r = d.q('#o-rate');
+  if (r) { const show = () => d.q('#o-rate-v').textContent = '×' + (+r.value).toFixed(2); show();
+    r.oninput = () => { prefs.rate = +r.value; P.rate = prefs.rate; savePrefs(); show(); }; }
+  const o = d.q('#o-out');
+  if (o) { o.value = prefs.sink || ''; o.onchange = async () => { prefs.sink = o.value; savePrefs(); await P.setSink(o.value); }; }
+  d.q('#o-orig').onchange = e => { prefs.orig = e.target.checked; savePrefs(); };
+  const s = d.q('#o-same');
+  if (s) s.onchange = e => { prefs.hearSame = e.target.checked; savePrefs(); };
+};
+
+init();
+</script>
+</body>
+</html>

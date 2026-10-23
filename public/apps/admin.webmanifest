@@ -1,0 +1,18 @@
+{
+  "id": "/admin",
+  "name": "CTRANSLATE Admin",
+  "short_name": "CT Admin",
+  "description": "Meetings, people and translation settings.",
+  "lang": "en-US",
+  "start_url": "/admin",
+  "scope": "/admin",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d0f13",
+  "theme_color": "#151922",
+  "icons": [
+    {"src": "/apps/admin-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/apps/admin-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "/apps/admin-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}

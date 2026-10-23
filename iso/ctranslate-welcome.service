@@ -1,0 +1,21 @@
+[Unit]
+Description=CTRANSLATE setup walk-through on the console (after the first boot)
+Conflicts=getty@tty1.service
+# Starts once the boot is over: cloud-init's last stage and systemd's own lines print to
+# this screen until then, and would scribble over the menu.
+After=ctranslate-firstboot.service cloud-final.service multi-user.target
+
+[Service]
+# simple, not oneshot: nobody may be at the console, and the boot must not wait for them.
+Type=simple
+Environment=TERM=linux
+ExecStartPre=-/bin/sh -c 'timeout 600 cloud-init status --wait >/dev/null 2>&1; dmesg -n 1; sleep 2; clear'
+ExecStart=/usr/local/sbin/ctranslate-setup --welcome
+ExecStopPost=/bin/rm -f /run/ctranslate-welcome-pending
+ExecStopPost=/bin/systemctl --no-block start getty@tty1.service
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
