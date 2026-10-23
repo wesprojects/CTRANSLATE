@@ -133,6 +133,25 @@ try:
     check(login(port, '90817263') == 200 and login(port, first_pin) == 401, 'the new PIN signs in; the old one no longer does')
     srv.terminate(); srv.wait()
 
+    # Test accounts: a No adds nothing; added (the sheet shown), they sign in; removed, they don't.
+    def login_as(port, name, pin):
+        c = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+        c.request('POST', '/api/login', json.dumps({'name': name, 'pin': pin}), {'X-VM': '1', 'Content-Type': 'application/json'})
+        return c.getresponse().status
+    r, c, _ = run(['demo', 'add', 'CANCEL', 'shell'])
+    check('systemctl stop' not in c and 'Test Speaker' not in open(data + '/users.json').read(), 'test accounts: No adds nothing')
+    r, c, shown = run(['demo', 'add', 'YES', 'YES', 'shell'])
+    check(r.returncode == 0 and 'systemctl stop ctranslate' in c and 'systemctl start ctranslate' in c, 'test accounts: the service stops and starts')
+    check('Test Listener SW' in shown and '666666' in shown and 'Demo training room' in shown, 'test accounts: the sign-in sheet is shown')
+    srv, port = start_server()
+    check(login_as(port, 'Test Speaker', '222222') == 200 and login(port, '90817263') == 200, 'test accounts sign in; Admin still does')
+    srv.terminate(); srv.wait()
+    r, c, shown = run(['demo', 'remove', 'YES', 'shell'])
+    check('Removed 6 test accounts and 2 demo meetings' in shown, 'test accounts removed')
+    srv, port = start_server()
+    check(login_as(port, 'Test Speaker', '222222') == 401 and login(port, '90817263') == 200, 'removed: they no longer sign in; Admin still does')
+    srv.terminate(); srv.wait()
+
     # Network: DHCP on the only wired port (the Wi-Fi one is not offered).
     r, c, _ = run(['network', 'dhcp', 'YES', 'YES', 'shell'])
     npf = sys_root + '/etc/netplan/01-ctranslate.yaml'
@@ -157,7 +176,7 @@ try:
 
     # The menu's own items exist and Exit leaves cleanly.
     r, c, _ = run(['CANCEL'])
-    check(r.returncode == 0 and all(x in c for x in ('status', 'pin', 'network', 'timezone', 'tunnel', 'cert', 'keys', 'service', 'reboot', 'poweroff')),
+    check(r.returncode == 0 and all(x in c for x in ('status', 'pin', 'network', 'timezone', 'tunnel', 'cert', 'keys', 'demo', 'service', 'reboot', 'poweroff')),
           'the menu offers every item and Exit returns 0')
     print('\nall setup menu checks passed')
 finally:

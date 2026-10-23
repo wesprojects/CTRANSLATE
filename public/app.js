@@ -82,6 +82,9 @@
       : d.toLocaleDateString(undefined, {weekday: 'short', month: 'short', day: 'numeric'});
     return day + ' ' + d.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
   };
+  VM.wifiLine = m => !m.wifi ? '' : m.wifiState === 'up' ? 'Wi-Fi \u201c' + m.wifiName + '\u201d is on.'
+    : m.wifiState === 'error' ? 'Wi-Fi problem: ' + (m.wifiError || 'unknown') : m.status === 'live' ? 'Wi-Fi is being set up\u2026'
+    : 'Wi-Fi \u201c' + (m.wifiName || '') + '\u201d comes on when the meeting starts.';
   VM.statusLabel = m => m.status === 'live' ? 'LIVE' : m.status === 'ended' ? 'ENDED' : 'SCHEDULED';
 
   /* ---------- header ---------- */
@@ -151,6 +154,8 @@
       (VM.config.guestsAllowed ? '<option value="anyone">Anyone who scans the QR code (no sign-up)</option>' : '') + '</select>' +
       '<label style="display:flex;align-items:center;margin-top:12px;font-size:13px"><input type="checkbox" id="me-standing"' + (m.standing ? ' checked' : '') + '>Standing room: the code and printed QR keep working for every session</label>' +
       '<label style="display:flex;align-items:center;margin-top:8px;font-size:13px"><input type="checkbox" id="me-onsite"' + (m.onsite ? ' checked' : '') + '>Guests only on the company Wi-Fi (not over the internet)</label>' +
+      (VM.config.unifi ? '<label style="display:flex;align-items:center;margin-top:8px;font-size:13px"><input type="checkbox" id="me-wifi"' + (m.wifi ? ' checked' : '') + '>Temporary Wi-Fi network while it is live (UniFi)</label>' +
+        '<label class="f" for="me-wifiname">Wi-Fi name (leave empty for CT and the title)</label><input id="me-wifiname" maxlength="32" value="' + esc(m.wifiName || '') + '">' : '') +
       '<label class="f">Speakers</label><div class="picklist" id="me-hosts">' + pick('h', speakers, hostIds) + '</div>' +
       '<label class="f">Listeners invited</label><input id="me-filter" placeholder="Search names" style="margin-bottom:6px">' +
       '<div class="picklist" id="me-listeners">' + pick('l', people, listenIds) + '</div>' +
@@ -170,6 +175,7 @@
         duration: +d.q('#me-dur').value || 60, access: d.q('#me-access').value,
         hosts: val('h'), listeners: val('l'), notes: d.q('#me-notes').value,
         standing: d.q('#me-standing').checked, onsite: d.q('#me-onsite').checked};
+      if (d.q('#me-wifi')) { body.wifi = d.q('#me-wifi').checked; body.wifiName = d.q('#me-wifiname').value.trim(); }
       try {
         const r = isNew ? await VM.api('POST', 'meetings', body) : await VM.api('PUT', 'meetings/' + m.id, body);
         d.close();
@@ -179,7 +185,10 @@
   };
 
   /* ---------- share: code, link, QR ---------- */
-  VM.joinLink = m => m.joinUrl.startsWith('http') ? m.joinUrl : location.origin + m.joinUrl;
+  // Opened at localhost on the server's own PC, the server names its LAN address (lanUrl) so
+  // links and QR codes reach phones.
+  VM.origin = () => (VM.config && VM.config.lanUrl) || location.origin;
+  VM.joinLink = m => m.joinUrl.startsWith('http') ? m.joinUrl : VM.origin() + m.joinUrl;
   VM.share = function (m, onChange) {
     const link = VM.joinLink(m);
     let qr = '';
@@ -191,6 +200,11 @@
       '<div style="text-align:center"><div class="hint">MEETING CODE</div><div class="code-big">' + esc(m.code) + '</div>' +
       (qr ? '<div class="qr">' + qr + '</div>' : '') +
       '<div class="hint" style="word-break:break-all">' + esc(link) + '</div></div>' +
+      (m.wifi && m.wifiName ? '<div class="card" style="margin-top:12px"><h2>Meeting Wi-Fi</h2>' +
+        (m.wifiQr && window.VMQR ? '<div class="qr" style="max-width:160px">' + VMQR.svg(m.wifiQr) + '</div><div class="hint" style="text-align:center">Scan with the camera to join the Wi-Fi</div>' : '') +
+        '<div>Name: <b>' + esc(m.wifiName) + '</b> &nbsp; Password: <b style="letter-spacing:.08em">' + esc(m.wifiPass || '') + '</b></div>' +
+        '<div class="hint" id="sh-wifi">' + esc(VM.wifiLine(m)) + '</div>' +
+        (m.wifiState === 'error' ? '<button class="btn" id="sh-wifi-retry" style="margin-top:6px">TRY AGAIN</button>' : '') + '</div>' : '') +
       '<div class="actions"><a class="btn big on" href="/print?m=' + encodeURIComponent(m.id) + '" target="_blank" rel="noopener">PRINT QR SHEET</a>' +
       '<button class="btn big" id="sh-copy">COPY LINK</button>' +
       (m.canHost ? '<button class="btn big" id="sh-new" title="Every printed copy stops working">NEW CODE</button>' : '') +
@@ -199,6 +213,11 @@
     d.q('#sh-copy').onclick = async () => {
       try { await navigator.clipboard.writeText(link); VM.toast('Link copied.'); }
       catch (e) { VM.toast(link, 8000); }
+    };
+    const wr = d.q('#sh-wifi-retry');
+    if (wr) wr.onclick = async () => {
+      try { const r = await VM.api('POST', 'meetings/' + m.id + '/wifi'); d.close(); if (onChange) onChange(r.meeting); VM.share(r.meeting, onChange); }
+      catch (e) { VM.toast(e.message); }
     };
     const nc = d.q('#sh-new');
     if (nc) nc.onclick = async () => {

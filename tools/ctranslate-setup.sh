@@ -257,6 +257,27 @@ do_keys() {
   if $changed; then systemctl restart ctranslate 2>/dev/null || true; msg "Keys saved; CTRANSLATE restarted. Check them on the admin page: Settings -> TEST ENGINES." 9; fi
 }
 
+as_app() {   # run a command as the service account, so the files it writes stay CTRANSLATE's
+  if [ "$(id -u)" -eq 0 ] && id ctranslate >/dev/null 2>&1; then runuser -u ctranslate -- "$@"; else "$@"; fi
+}
+do_demo() {
+  local c t ok=0
+  c=$(whiptail --title "$TITLE" --menu "Test accounts: six invented accounts with known PINs (Test Admin, Test Speaker, Test Listener ES ...) and two demo meetings, for trying CTRANSLATE on a home or test network." 16 78 3 \
+    add    "Add the test accounts (or reset their PINs)" \
+    remove "Remove the test accounts and demo meetings" \
+    back   "Back" 3>&1 1>&2 2>&3) || return
+  [ "$c" = back ] && return
+  if [ "$c" = add ]; then
+    yes_no "Anyone who knows these PINs can sign in, also through the Cloudflare Tunnel if it is set up. Remove them before real use (this menu, Test accounts, Remove).\n\nAdd them?" 12 || return
+  fi
+  t=$(mktemp)
+  systemctl stop ctranslate 2>/dev/null || true
+  as_app python3 "$DEST/server.py" --data "$DATA" --demo-setup "$c" > "$t" 2>&1 || ok=$?
+  systemctl start ctranslate 2>/dev/null || true
+  if [ "$ok" -ne 0 ]; then echo "(failed; nothing was changed by the step that failed)" >> "$t"; fi
+  show_file "$t"; rm -f "$t"
+}
+
 do_service() {
   local c t
   c=$(whiptail --title "$TITLE" --menu "CTRANSLATE service" 14 64 4 \
@@ -273,7 +294,7 @@ menu() {
   while true; do
     ip=$(lan_ips | head -1); p=$(port); p=${p:-8453}
     head="Admin page: https://${ip:-(no address yet)}$( [ "$p" = 443 ] || echo ":$p")/admin"
-    c=$(whiptail --title "$TITLE" --cancel-button "Exit" --menu "$head" 22 76 12 \
+    c=$(whiptail --title "$TITLE" --cancel-button "Exit" --menu "$head" 23 76 13 \
       status   "Status: addresses, links, what is set up" \
       pin      "Admin PIN: set a new one" \
       network  "Network: automatic or a fixed address" \
@@ -281,13 +302,14 @@ menu() {
       tunnel   "Cloudflare Tunnel: public HTTPS name" \
       cert     "Let's Encrypt certificate for the LAN" \
       keys     "API keys: Google, Anthropic, Azure" \
+      demo     "Test accounts: add or remove" \
       service  "Service: restart, logs" \
       reboot   "Restart this server" \
       poweroff "Shut down this server" \
       shell    "Exit to the command line" 3>&1 1>&2 2>&3) || return 0
     case "$c" in
       status) do_status ;; pin) do_pin ;; network) do_network ;; timezone) do_timezone ;;
-      tunnel) do_tunnel ;; cert) do_cert ;; keys) do_keys ;; service) do_service ;;
+      tunnel) do_tunnel ;; cert) do_cert ;; keys) do_keys ;; demo) do_demo ;; service) do_service ;;
       reboot) yes_no "Restart the server now? Meetings in progress are cut off." 8 && systemctl reboot ;;
       poweroff) yes_no "Shut the server down now? Meetings stop until it is switched on again." 8 && systemctl poweroff ;;
       shell) return 0 ;;

@@ -39,6 +39,23 @@ No accounts and no approval for listeners:
 
 **NEW CODE** (in the QR sheet window) retires a sheet that went somewhere it shouldn't. Every printed copy stops working and guests on it are disconnected.
 
+### Meeting Wi-Fi (UniFi)
+
+With a UniFi console, a meeting can bring up its own Wi-Fi network while it is live and remove it when it ends. Tick **Make a temporary Wi-Fi network for it (UniFi)** on an instant meeting, or **Temporary Wi-Fi network while it is live** in a meeting's editor. The network is called "CT" and the title (or a name you give), with its own password. The QR sheet then has two codes: **①** joins the Wi-Fi, **②** opens the meeting, with "Scan 1 to join the Wi-Fi, then 2…" in every language. The speaker console and the admin list show whether the network is on; if UniFi refused it, **TRY AGAIN** is in the QR window.
+
+Set up once in **Admin → Settings → UniFi meeting Wi-Fi** (UniFi Network 10.0.162 or later):
+
+1. In UniFi Network: **Settings → Control Plane → Integrations → Create API Key**.
+2. Enter the console's address (for example `https://192.168.1.1`) and the key, then press **TEST UNIFI**. CTRANSLATE trusts the certificate the console shows at that moment and refuses a different one later. A replaced console needs **TEST UNIFI** again.
+3. Pick the site, the network (VLAN) the meeting Wi-Fi joins, and the access points that broadcast it. Press **SAVE SETTINGS**.
+
+Things to know:
+
+- **Adding or removing a network restarts the radios** of the access points that broadcast it: their Wi-Fi drops for a few seconds. Pick the access points near the meeting rooms so the rest of the building is left alone.
+- **Phones on the meeting network must reach CTRANSLATE.** On a guest network or an isolated VLAN they reach it through the internet (the Cloudflare Tunnel); on a network that can reach the server, directly.
+- WPA2 with a 12-character password; phones on it cannot see one another. **NEW CODE** also changes the password.
+- CTRANSLATE deletes only networks it made. If the server was off when a meeting ended, it removes the network when it starts again.
+
 ---
 
 ## Speaking
@@ -57,6 +74,12 @@ No accounts and no approval for listeners:
 - Dropped Wi-Fi reconnects by itself and shows anything missed.
 
 ---
+
+## Test at home: the test kit
+
+`testkit/` runs a test server on your own PC for phones on your home Wi-Fi, with six invented test accounts (Test Admin `111111`, Test Speaker `222222`, Test Speaker ES `333333`, Test Listener ES / FR / SW `444444` / `555555` / `666666`) and two demo meetings. Windows: install Python 3, then double-click `testkit\START-TEST.bat`. Mac or Linux: `sh testkit/start-test.sh`. `testkit/README-TEST.txt` walks through it: the speaker on the PC at `localhost`, phones by QR code, a Cloudflare quick tunnel for HTTPS, and UniFi.
+
+The same accounts come from `python3 server.py --demo` (anywhere), or on an installed server from the setup menu's **Test accounts** (add or remove). Anyone who knows the PINs can sign in, so remove them before real use; **Admin → People** marks them **TEST ACCOUNT**.
 
 ## Try it on a PC first
 
@@ -161,6 +184,9 @@ Check current prices on Google's and Anthropic's pricing pages.
 python3 tests/smoke_test.py                                   # server end to end, fake engines
 NODE_PATH=$(npm root -g) node tests/browser_test.js [shots/]  # the real pages in Chromium (Playwright)
 python3 tests/setup_test.py                                   # the console setup menu, in a sandbox
+python3 tests/unifi_test.py                                   # meeting Wi-Fi against a stand-in UniFi console (needs openssl)
+NODE_PATH=$(npm root -g) node tests/unifi_browser_test.js [shots/]  # the UniFi screens and the two-code sheet
+python3 tests/demo_test.py                                    # the --demo test accounts
 pip install numpy opencv-python-headless && python3 tests/qr_test.py   # QR codes decode
 ```
 

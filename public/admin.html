@@ -91,7 +91,8 @@ async function meetings() {
     const access = m.access === 'anyone' ? 'QR / GUESTS' + (m.onsite ? ' (WI-FI ONLY)' : '') : m.access === 'staff' ? 'ALL STAFF' : 'INVITED';
     d.innerHTML = '<span class="dot ' + (m.status === 'live' ? 'live' : '') + '"></span><div class="grow" style="min-width:200px"><div class="t">' + esc(m.title) + '</div>' +
       '<div class="s">' + esc(when) + ' · CODE ' + esc(m.code) + ' · ' + access + '</div>' +
-      '<div class="s">Speakers: ' + (m.hosts.map(h => esc(h.name)).join(', ') || '—') + (m.listeners.length ? ' · ' + m.listeners.length + ' invited' : '') + '</div></div>' +
+      '<div class="s">Speakers: ' + (m.hosts.map(h => esc(h.name)).join(', ') || '—') + (m.listeners.length ? ' · ' + m.listeners.length + ' invited' : '') + '</div>' +
+      (m.wifi ? '<div class="s"' + (m.wifiState === 'error' ? ' style="color:var(--red)"' : '') + '>\u{1F4F6} ' + esc(VM.wifiLine(m)) + '</div>' : '') + '</div>' +
       '<div class="actions-inline">' +
       (m.status !== 'ended' ? '<a class="btn" href="/speak?m=' + encodeURIComponent(m.id) + '">OPEN CONSOLE</a><button class="btn" data-a="qr">QR</button>' : '') +
       '<button class="btn" data-a="edit">EDIT</button>' +
@@ -118,12 +119,14 @@ function instant() {
     '<label class="f" for="i-title">Title</label><input id="i-title" maxlength="120" value="' + esc('Meeting ' + now.toLocaleDateString(undefined, {month: 'short', day: 'numeric'})) + '">' +
     '<label style="display:flex;align-items:center;margin-top:14px;font-size:13px"><input type="checkbox" id="i-standing" checked>Standing room — the same QR code for every session (a sign on the wall)</label>' +
     '<label style="display:flex;align-items:center;margin-top:10px;font-size:13px"><input type="checkbox" id="i-onsite"' + (VM.config.onsiteReady ? ' checked' : '') + '>Only phones on the company Wi-Fi can join</label>' +
+    (VM.config.unifi ? '<label style="display:flex;align-items:center;margin-top:10px;font-size:13px"><input type="checkbox" id="i-wifi"' + (VM.config.unifi ? ' checked' : '') + '>Make a temporary Wi-Fi network for it (UniFi)</label>' : '') +
     '<div class="err-text" id="i-err"></div>' +
     '<div class="actions"><button class="btn big" data-close>CANCEL</button><button class="btn big go" id="i-go">CREATE</button></div>');
   d.q('#i-go').onclick = async () => {
     try {
       const r = await VM.api('POST', 'meetings', {instant: true, title: d.q('#i-title').value,
-        standing: d.q('#i-standing').checked, onsite: d.q('#i-onsite').checked});
+        standing: d.q('#i-standing').checked, onsite: d.q('#i-onsite').checked,
+        wifi: !!(d.q('#i-wifi') && d.q('#i-wifi').checked)});
       d.close(); meetings(); VM.share(r.meeting, () => meetings());
     } catch (e) { d.q('#i-err').textContent = e.message; }
   };
@@ -143,7 +146,8 @@ async function people() {
     ps.filter(p => !f || p.name.toLowerCase().includes(f)).forEach(p => {
       const d = document.createElement('div'); d.className = 'item';
       d.innerHTML = '<span class="chip on" style="--chip:' + VM.lang(p.lang).color + '">' + esc(VM.lang(p.lang).tag) + '</span>' +
-        '<div class="grow"><div class="t">' + esc(p.name) + (p.active ? '' : ' <span class="chip">INACTIVE</span>') + '</div>' +
+        '<div class="grow"><div class="t">' + esc(p.name) + (p.active ? '' : ' <span class="chip">INACTIVE</span>') +
+          (p.demo ? ' <span class="chip" title="Made by --demo with a known PIN. Remove it before real use.">TEST ACCOUNT</span>' : '') + '</div>' +
         '<div class="s">' + esc(p.role.toUpperCase()) + ' · ' + (p.lastSeen ? 'LAST SEEN ' + esc(VM.fmtWhen(p.lastSeen)) : 'NEVER SIGNED IN') + '</div></div>' +
         '<button class="btn">EDIT</button>';
       d.querySelector('button').onclick = () => person(p);
@@ -182,7 +186,7 @@ function person(p) {
       if (isNew) await VM.api('POST', 'people', body); else await VM.api('PUT', 'people/' + p.id, body);
       d.close();
       if (pin) VM.modal('<h3>GIVE THIS TO ' + esc(body.name.toUpperCase()) + '</h3><p>Name: <b>' + esc(body.name) + '</b><br>PIN: <b style="font-size:22px;letter-spacing:.2em">' + esc(pin) + '</b></p>' +
-        '<p class="hint">They sign in once in ' + (body.role === 'listener' ? 'CTRANSLATE Listen' : 'CTRANSLATE Speak') + ' at ' + esc(location.origin + (body.role === 'listener' ? '/listen' : '/speak')) + ', and can pin it to their home screen.</p>' +
+        '<p class="hint">They sign in once in ' + (body.role === 'listener' ? 'CTRANSLATE Listen' : 'CTRANSLATE Speak') + ' at ' + esc(VM.origin() + (body.role === 'listener' ? '/listen' : '/speak')) + ', and can pin it to their home screen.</p>' +
         '<div class="actions"><button class="btn big go" data-close>DONE</button></div>');
       people();
     } catch (e) { d.q('#pe-err').textContent = e.message; }
@@ -246,6 +250,16 @@ async function settings() {
     '<div class="hint">Phones on the Wi-Fi reach CTRANSLATE through the Cloudflare Tunnel too, so CTRANSLATE tells on-site phones by the factory’s public address. Press the button while on the factory Wi-Fi. Not needed if you don’t use the tunnel.</div>' +
     '<label class="f" for="s-days">Keep transcripts for (days)</label><input id="s-days" type="number" min="1" max="3650" value="' + s.transcriptDays + '" style="max-width:140px"></div>' +
 
+    '<div class="card"><h2>UniFi meeting Wi-Fi</h2>' +
+    '<p class="hint" style="margin-top:0">Meetings can bring up their own Wi-Fi network while they are live, with a code on the QR sheet to join it. Needs UniFi Network 10.0.162 or later.</p>' +
+    '<label class="f" for="u-url">Console address</label><input id="u-url" placeholder="https://192.168.1.1" value="' + esc(s.unifiUrl || '') + '">' +
+    keyField('k-unifi', 'UniFi API key', s.unifiKeySet, s.unifiKeyHint, 'UniFi Network → Settings → Control Plane → Integrations → Create API Key.') +
+    '<div class="row" style="margin-top:10px"><button class="btn big" id="u-test">TEST UNIFI</button><span class="grow hint" id="u-state">' +
+      (VM.config.unifi ? 'Ready: meetings can make Wi-Fi networks. TEST UNIFI to change the site, network or access points.'
+        : s.unifiUrl && s.unifiFingerprint ? 'Pick a site: press TEST UNIFI.' : 'Not set up.') + '</span></div>' +
+    '<div class="err-text" id="u-err"></div><div id="u-pick"></div>' +
+    '<div class="hint">Adding or removing a network restarts the radios of the access points that broadcast it: their Wi-Fi drops for a few seconds. Pick the access points near the meeting rooms to keep that off the rest of the building. Phones on the meeting network must reach CTRANSLATE: through the internet (Cloudflare Tunnel) on a guest network, or directly.</div></div>' +
+
     '<div class="card"><h2>API keys</h2>' +
     keyField('k-google', 'Google Cloud API key', s.googleKeySet, s.googleKeyHint, 'One key for Text-to-Speech, Translation and Speech-to-Text. In Google Cloud: enable those three APIs, then Credentials → Create API key, restricted to them.') +
     keyField('k-anthropic', 'Anthropic API key', s.anthropicKeySet, s.anthropicKeyHint, 'For Claude translation. console.anthropic.com → API keys.') +
@@ -271,13 +285,52 @@ async function settings() {
       speakingRate: +$('s-rate').value || 1, freeVoice: $('s-free').checked, azureRegion: $('s-region').value,
       serverStt: $('s-stt').checked, guestsAllowed: $('s-guests').checked, transcriptDays: +$('s-days').value || 30,
       siteIps: $('s-site').value.trim().split(/[\s,]+/).filter(Boolean)};
-    [['k-google', 'googleKey'], ['k-anthropic', 'anthropicKey'], ['k-azure', 'azureKey']].forEach(([id, k]) => {
+    body.unifiUrl = $('u-url').value.trim();
+    if (unifiPicked) Object.assign(body, unifiPicked());
+    [['k-google', 'googleKey'], ['k-anthropic', 'anthropicKey'], ['k-azure', 'azureKey'], ['k-unifi', 'unifiKey']].forEach(([id, k]) => {
       const v = $(id).value.trim();
       if (v) body[k] = v; else if (cleared.has(id)) body[k] = '';
     });
     $('s-err').textContent = '';
     try { await VM.api('PUT', 'settings', body); VM.config = await VM.api('GET', 'config'); VM.toast('Settings saved.'); settings(); }
     catch (e) { $('s-err').textContent = e.message; }
+  };
+  // TEST UNIFI checks the address and key typed (or saved), pins the console's certificate and
+  // lists what to pick. The picks are saved with SAVE SETTINGS.
+  let unifiPicked = null;
+  $('u-test').onclick = async () => {
+    $('u-err').textContent = ''; $('u-state').textContent = 'Asking the console\u2026'; $('u-test').disabled = true;
+    try {
+      const r = await VM.api('POST', 'settings/unifi-test', {url: $('u-url').value.trim(), key: $('k-unifi').value.trim()});
+      const f = r.unifi;
+      $('k-unifi').value = '';
+      $('u-state').textContent = 'Connected: UniFi Network ' + f.version + '.' +
+        (s.unifiFingerprint && s.unifiFingerprint !== f.fingerprint ? ' Its certificate changed and is trusted now.' : '');
+      s.unifiFingerprint = f.fingerprint; s.unifiUrl = $('u-url').value.trim();
+      const site0 = f.sites.find(x => x.id === (r.site || s.unifiSite)) || f.sites[0];
+      $('u-pick').innerHTML = '<div class="row"><div class="grow"><label class="f" for="u-site">Site</label><select id="u-site">' +
+        f.sites.map(x => '<option value="' + esc(x.id) + '">' + esc(x.name) + '</option>').join('') + '</select></div>' +
+        '<div class="grow"><label class="f" for="u-net">Network (VLAN) for meeting Wi-Fi</label><select id="u-net"></select></div></div>' +
+        '<label class="f">Access points that broadcast it (none ticked = every one)</label><div class="grid2" id="u-aps"></div>';
+      const fill = () => {
+        const site = f.sites.find(x => x.id === $('u-site').value) || {networks: [], aps: []};
+        const same = site.id === s.unifiSite;
+        $('u-net').innerHTML = '<option value="">Default network</option>' + site.networks.map(n =>
+          '<option value="' + esc(n.id) + '">' + esc(n.name) + (n.vlanId ? ' \u00b7 VLAN ' + n.vlanId : '') + (n.default ? ' (default)' : '') + '</option>').join('');
+        $('u-net').value = same && site.networks.some(n => n.id === s.unifiNetwork) ? s.unifiNetwork : '';
+        $('u-aps').innerHTML = site.aps.length ? site.aps.map(a =>
+          '<label><input type="checkbox" name="uap" value="' + esc(a.id) + '"' + (same && (s.unifiAps || []).includes(a.id) ? ' checked' : '') + '>' +
+          esc(a.name || a.model || a.id) + (a.state && a.state !== 'ONLINE' ? ' \u00b7 ' + esc(a.state.toLowerCase()) : '') + '</label>').join('')
+          : '<div class="hint">No access points found on this site.</div>';
+      };
+      if (site0) $('u-site').value = site0.id;
+      $('u-site').onchange = fill; fill();
+      unifiPicked = () => ({unifiSite: $('u-site').value, unifiNetwork: $('u-net').value,
+        unifiAps: Array.from(document.querySelectorAll('input[name=uap]:checked')).map(i => i.value)});
+      if (!f.sites.length) $('u-err').textContent = 'The console has no sites.';
+      else VM.toast('Pick the network and access points, then SAVE SETTINGS.');
+    } catch (e) { $('u-err').textContent = e.message; $('u-state').textContent = ''; }
+    $('u-test').disabled = false;
   };
   $('s-myip').onclick = async () => {
     try { const r = await VM.api('GET', 'myip'); const cur = $('s-site').value.trim(); if (!cur.split(/[\s,]+/).includes(r.ip)) $('s-site').value = (cur + ' ' + r.ip).trim(); VM.toast('Added ' + r.ip + '. Save to keep it.'); }

@@ -11,3 +11,6 @@ __pycache__/
 # Installer ISO builds
 *.iso
 .build-iso/
+demo-accounts.txt
+# The home test kit's data (testkit/START-TEST.bat, start-test.sh)
+testkit/data/

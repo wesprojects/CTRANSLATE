@@ -29,11 +29,11 @@ meetings.json, settings.json (API keys; mode 0600), sessions.json,
 transcripts/. Each is written to a temporary file and moved into place.
 """
 import argparse, base64, collections, concurrent.futures, hashlib, hmac, ipaddress, json
-import os, queue, re, secrets, socket, ssl, sys, threading, time, uuid
+import http.client, os, queue, re, secrets, socket, ssl, sys, threading, time, uuid
 import urllib.error, urllib.parse, urllib.request
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-BUILD_VERSION = '2026-10-23.1'   # format: YYYY-MM-DD.N, bump every revision; pages show it
+BUILD_VERSION = '2026-10-23.2'   # format: YYYY-MM-DD.N, bump every revision; pages show it
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PUBLIC = os.path.join(ROOT, 'public')
@@ -102,9 +102,17 @@ DEFAULT_SETTINGS = {
     'azureRegion': 'eastus',      # Azure Speech resource region, when an Azure key is set
     'freeVoice': True,            # last resort before the device voice: Google Translate's read-aloud (unofficial)
     'siteIps': [],                # the factory's public internet address(es), for "guests on the Wi-Fi only"
+    # UniFi: a temporary Wi-Fi network per meeting (see the UniFi section below)
+    'unifiUrl': '',               # the console, e.g. https://192.168.1.1
+    'unifiSite': '',              # site id (UUID), picked after TEST UNIFI
+    'unifiNetwork': '',           # network (VLAN) id for meeting Wi-Fi; '' = the default network
+    'unifiAps': [],               # access point ids that broadcast it; [] = every access point
+    'unifiFingerprint': '',       # SHA-256 of the console's certificate, pinned by TEST UNIFI
+    'unifiOwned': [],             # Wi-Fi network ids this server created (the only ones it deletes)
 }
-SECRET_KEYS = ('googleKey', 'anthropicKey', 'azureKey')
-ENV_KEYS = {'googleKey': 'GOOGLE_API_KEY', 'anthropicKey': 'ANTHROPIC_API_KEY', 'azureKey': 'AZURE_SPEECH_KEY'}
+SECRET_KEYS = ('googleKey', 'anthropicKey', 'azureKey', 'unifiKey')
+ENV_KEYS = {'googleKey': 'GOOGLE_API_KEY', 'anthropicKey': 'ANTHROPIC_API_KEY', 'azureKey': 'AZURE_SPEECH_KEY',
+            'unifiKey': 'UNIFI_API_KEY'}
 
 # Microsoft Azure neural voices: the backup when Google has no voice for a language or fails.
 AZURE_VOICES = {
@@ -238,6 +246,7 @@ def public_user(u, full=False):
         d['active'] = u.get('active', True)
         d['created'] = u.get('created')
         d['lastSeen'] = u.get('lastSeen')
+        d['demo'] = bool(u.get('demo'))
     return d
 
 
@@ -269,6 +278,78 @@ def ensure_admin():
         with os.fdopen(fd, 'w') as f:
             f.write(pin + '\n')
         log('== first run: sign in as "Admin" with PIN', pin, '(also in admin-pin.txt)')
+
+
+# --demo: invented test accounts with known PINs, for trying CTRANSLATE on a home or test
+# network. Never on a real server: anyone who reads this file knows the PINs.
+DEMO_PEOPLE = [  # name, role, language, PIN
+    ('Test Admin', 'admin', 'en', '111111'),
+    ('Test Speaker', 'speaker', 'en', '222222'),
+    ('Test Speaker ES', 'speaker', 'es', '333333'),
+    ('Test Listener ES', 'listener', 'es', '444444'),
+    ('Test Listener FR', 'listener', 'fr', '555555'),
+    ('Test Listener SW', 'listener', 'sw', '666666'),
+]
+
+
+def seed_demo():
+    """Adds (or resets) the DEMO_PEOPLE and two demo meetings; returns the sign-in sheet text.
+    Run again, it changes nothing but the PINs, roles and languages back to the list."""
+    with LOCK:
+        ids = {}
+        for name, role, lang, pin in DEMO_PEOPLE:
+            u = find_user_by_name(name)
+            if not u:
+                u = {'id': uuid.uuid4().hex[:10], 'name': name, 'created': now_ms()}
+                STORE.users[u['id']] = u
+            u.update(role=role, lang=lang, active=True, demo=True)
+            set_pin(u, pin)
+            ids[name] = u['id']
+        STORE.save_users()
+        have = {m.get('demo') for m in STORE.meetings.values()}
+        t = time.localtime(time.time() + 86400)
+        tomorrow9 = int(time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 9, 0, 0, 0, 0, -1)) * 1000)
+        for key, extra in (
+                ('room', {'title': 'Demo training room', 'standing': True, 'access': 'anyone',
+                          'hosts': [ids['Test Speaker'], ids['Test Speaker ES']], 'listeners': []}),
+                ('invited', {'title': 'Demo invited meeting', 'start': tomorrow9, 'access': 'invited',
+                             'hosts': [ids['Test Speaker']],
+                             'listeners': [ids['Test Listener ES'], ids['Test Listener FR'], ids['Test Listener SW']]})):
+            if key in have:
+                continue
+            m = {'id': uuid.uuid4().hex[:10], 'code': new_code(), 'notes': '', 'status': 'scheduled',
+                 'start': None, 'duration': 60, 'kicked': [], 'standing': False, 'onsite': False,
+                 'createdBy': ids['Test Admin'], 'createdAt': now_ms(), 'demo': key}
+            m.update(extra)
+            STORE.meetings[m['id']] = m
+        STORE.save_meetings()
+        room = next(m for m in STORE.meetings.values() if m.get('demo') == 'room')
+    lines = ['CTRANSLATE test accounts (invented; for testing only)', '',
+             '%-18s %-9s %-4s %s' % ('Name', 'Role', 'Lang', 'PIN')]
+    lines += ['%-18s %-9s %-4s %s' % (n, r, l, p) for n, r, l, p in DEMO_PEOPLE]
+    lines += ['', 'Demo training room (standing, QR guests): code %s' % room['code'],
+              'Demo invited meeting: tomorrow 9:00, Test Speaker with the three listeners', '']
+    return '\n'.join(lines)
+
+
+def remove_demo():
+    """Removes what seed_demo() added: the accounts (and their sessions) and the demo meetings."""
+    with LOCK:
+        gone = [k for k, u in STORE.users.items() if u.get('demo')]
+        for k in gone:
+            del STORE.users[k]
+        for k, sess in list(STORE.sessions.items()):
+            if sess.get('uid') in gone:
+                del STORE.sessions[k]
+        ms = [k for k, m in STORE.meetings.items() if m.get('demo')]
+        for k in ms:
+            del STORE.meetings[k]
+        STORE.save_users(); STORE.save_sessions(); STORE.save_meetings()
+    try:
+        os.remove(path('demo-accounts.txt'))
+    except FileNotFoundError:
+        pass
+    return len(gone), len(ms)
 
 
 def new_session(data, ttl):
@@ -343,6 +424,19 @@ CODE_LIMIT = RateLimit(30, 600)
 CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'   # no 0/O or 1/I
 
 
+def lan_ip():
+    """This machine's address on the local network (the one its default route uses), or ''."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('192.0.2.1', 9))         # UDP: nothing is sent; the system picks the address
+        ip = s.getsockname()[0]
+        return '' if ip.startswith('127.') or ip == '0.0.0.0' else ip
+    except OSError:
+        return ''
+    finally:
+        s.close()
+
+
 def new_code():
     while True:
         c = ''.join(secrets.choice(CODE_CHARS) for _ in range(6))
@@ -400,6 +494,11 @@ def meeting_view(m, me):
     live = LIVE.get(m['id'])
     d['online'] = live.count() if live else 0
     d['joinUrl'] = join_url(m)
+    d['wifi'] = bool(m.get('wifi'))
+    if d['canHost'] and m.get('wifi'):
+        d.update(wifiName=m.get('wifiName'), wifiPass=m.get('wifiPass'),
+                 wifiQr=wifi_qr_text(m.get('wifiName') or '', m.get('wifiPass') or ''),
+                 wifiState=m.get('wifiState', 'off'), wifiError=m.get('wifiError', ''))
     return d
 
 
@@ -433,6 +532,18 @@ def clean_meeting_fields(body, m, me):
     for k in ('standing', 'onsite'):
         if k in body:
             m[k] = bool(body[k])
+    if 'wifiName' in body:
+        n = clean_ssid(body['wifiName'])
+        if body['wifiName'] and not n:
+            return 'A Wi-Fi name is 1 to 32 letters, digits, spaces or - _ . characters.'
+        m['wifiName'] = n
+    if 'wifi' in body:
+        m['wifi'] = bool(body['wifi'])
+        if m['wifi']:
+            if not unifi_on():
+                return 'UniFi is not set up. An admin connects it under Settings, UniFi meeting Wi-Fi.'
+            m['wifiName'] = m.get('wifiName') or clean_ssid('CT ' + (m.get('title') or body.get('title') or 'Meeting'))
+            m['wifiPass'] = m.get('wifiPass') or wifi_password()
     if 'access' in body:
         if body['access'] not in ('invited', 'staff', 'anyone'):
             return 'access must be invited, staff or anyone.'
@@ -1002,6 +1113,289 @@ def stt_google(pcm, lang):
 
 
 # ---------------------------------------------------------------------------
+# UniFi: a temporary Wi-Fi network per meeting
+#
+# The official UniFi Network Integration API (Network 10.0.162 or later), on the console
+# at https://<console>/proxy/network/integration/v1/..., with an API key from
+# Network -> Settings -> Control Plane -> Integrations. The console's certificate is
+# self-signed, so TEST UNIFI pins its SHA-256 and every later call checks it before the key
+# is sent. A meeting with `wifi` gets a WPA2 network (its own name and password) while it is
+# live; the reconciler makes UniFi match that after every change and every 5 minutes, and
+# deletes only networks this server created (settings.unifiOwned).
+# Note: adding or removing a Wi-Fi network makes UniFi re-provision the access points that
+# broadcast it, and their clients drop for a few seconds. unifiAps limits which ones.
+# ---------------------------------------------------------------------------
+UNIFI_MIN = (10, 0, 162)
+UNIFI_BASE = '/proxy/network/integration'
+SSID_RE = re.compile(r'^[A-Za-z0-9 _.\-]{1,32}$')
+
+
+class UnifiError(Exception):
+    pass
+
+
+def unifi_key():
+    return setting('unifiKey') or os.environ.get('UNIFI_API_KEY', '')
+
+
+def unifi_on():
+    return bool(setting('unifiUrl') and unifi_key() and setting('unifiSite') and setting('unifiFingerprint'))
+
+
+def clean_ssid(s):
+    s = re.sub(r'[^A-Za-z0-9 _.\-]', '', str(s or '')).strip()
+    s = re.sub(r'\s+', ' ', s)[:32].strip()
+    return s if SSID_RE.match(s or '') else ''
+
+
+def wifi_password():
+    """12 characters, lower case letters and digits without look-alikes: easy to type if the QR fails."""
+    return ''.join(secrets.choice('abcdefghjkmnpqrstuvwxyz23456789') for _ in range(12))
+
+
+def wifi_qr_text(ssid, password):
+    esc = lambda x: re.sub(r'([\;,:"])', r'\\\1', x)
+    return 'WIFI:T:WPA;S:%s;P:%s;;' % (esc(ssid), esc(password))
+
+
+def _version(text):
+    nums = [int(x) for x in re.findall(r'\d+', text or '')[:3]]
+    return tuple(nums + [0] * (3 - len(nums)))
+
+
+def unifi_call(method, path, body=None, timeout=15, url=None, key=None, pin=None, learn=False):
+    """One request to the console -> parsed JSON (or None). Checks the pinned certificate
+    before the API key goes out; with learn=True returns (json, fingerprint) and pins nothing."""
+    url = (url or setting('unifiUrl') or '').rstrip('/')
+    key = key or unifi_key()
+    u = urllib.parse.urlsplit(url)
+    if u.scheme != 'https' or not u.hostname:
+        raise UnifiError('The console address must look like https://192.168.1.1')
+    if not key:
+        raise UnifiError('No UniFi API key set.')
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE          # self-signed on every console; the pin below replaces it
+    conn = http.client.HTTPSConnection(u.hostname, u.port or 443, timeout=timeout, context=ctx)
+    try:
+        try:
+            conn.connect()
+        except (OSError, ssl.SSLError) as e:
+            raise UnifiError('Cannot reach the console at %s (%s).' % (url, e.__class__.__name__))
+        fp = hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest()
+        want = setting('unifiFingerprint') if pin is None else pin
+        if not learn and (not want or not hmac.compare_digest(fp, want)):
+            raise UnifiError('The console\'s certificate is not the one trusted with TEST UNIFI. '
+                             'If you replaced or reset the console, press TEST UNIFI again.')
+        data = json.dumps(body).encode() if body is not None else None
+        conn.request(method, UNIFI_BASE + path, body=data,
+                     headers={'X-API-KEY': key, 'Accept': 'application/json',
+                              'Content-Type': 'application/json', 'User-Agent': 'ctranslate/' + BUILD_VERSION})
+        r = conn.getresponse()
+        raw = r.read(4 << 20)
+    except (OSError, ssl.SSLError, http.client.HTTPException) as e:
+        raise UnifiError('UniFi request failed: %s' % e.__class__.__name__)
+    finally:
+        conn.close()
+    try:
+        out = json.loads(raw.decode('utf-8')) if raw else None
+    except ValueError:
+        out = None
+    if r.status >= 400:
+        msg = (out or {}).get('message') if isinstance(out, dict) else ''
+        if r.status == 401:
+            msg = 'the API key was refused'
+        elif r.status == 404 and path.startswith('/v1/sites/') and '/wifi/' in path and method == 'POST':
+            msg = 'this console has no Wi-Fi API (UniFi Network 10.0.162 or later is needed)'
+        raise UnifiError('UniFi answered %d: %s' % (r.status, msg or raw[:200].decode('utf-8', 'replace')))
+    return (out, fp) if learn else out
+
+
+def unifi_list(path, **kw):
+    items, offset = [], 0
+    while True:
+        page = unifi_call('GET', '%s%soffset=%d&limit=200' % (path, '&' if '?' in path else '?', offset), **kw) or {}
+        data = page.get('data') or []
+        items += data
+        offset += len(data)
+        if not data or offset >= int(page.get('totalCount') or 0):
+            return items
+
+
+def unifi_probe(url, key):
+    """TEST UNIFI: version, sites, and for each site its networks and access points. Pins the certificate."""
+    info, fp = unifi_call('GET', '/v1/info', url=url, key=key, learn=True)
+    version = (info or {}).get('applicationVersion', '')
+    if _version(version) < UNIFI_MIN:
+        raise UnifiError('UniFi Network %s is too old for Wi-Fi control; 10.0.162 or later is needed '
+                         '(update it under UniFi OS -> Settings -> Updates).' % (version or 'unknown'))
+    sites = []
+    for site in unifi_list('/v1/sites', url=url, key=key, pin=fp):
+        sid = site.get('id')
+        nets = unifi_list('/v1/sites/%s/networks' % sid, url=url, key=key, pin=fp)
+        devs = unifi_list('/v1/sites/%s/devices' % sid, url=url, key=key, pin=fp)
+        sites.append({'id': sid, 'name': site.get('name') or sid,
+                      'networks': [{'id': n.get('id'), 'name': n.get('name'), 'vlanId': n.get('vlanId'),
+                                    'default': bool(n.get('default'))} for n in nets],
+                      'aps': [{'id': d.get('id'), 'name': d.get('name') or d.get('model'), 'model': d.get('model'),
+                               'state': d.get('state')} for d in devs if 'accessPoint' in (d.get('features') or [])]})
+    return {'version': version, 'fingerprint': fp, 'sites': sites}
+
+
+def wifi_payload(m, version):
+    """The create request, built to the console's version (fields required since 10.1 and 10.6.106)."""
+    body = {
+        'type': 'STANDARD', 'name': m['wifiName'], 'enabled': True,
+        'network': {'type': 'SPECIFIC', 'networkId': setting('unifiNetwork')} if setting('unifiNetwork')
+                   else {'type': 'NATIVE'},
+        # WPA2 Personal: every phone joins it, and a WIFI: QR code carries it.
+        'securityConfiguration': {'type': 'WPA2_PERSONAL', 'passphrase': m['wifiPass'],
+                                  'fastRoamingEnabled': False, 'pmfMode': 'OPTIONAL'},
+        'broadcastingFrequenciesGHz': [2.4, 5],
+        'hideName': False,
+        'clientIsolationEnabled': True,          # guests' phones cannot see one another
+        'multicastToUnicastConversionEnabled': False,
+        'uapsdEnabled': False,
+        'arpProxyEnabled': False,
+        'bssTransitionEnabled': True,            # helps phones move between access points as people walk
+    }
+    v = _version(version)
+    if v >= (10, 1, 0):
+        body['advertiseDeviceName'] = False
+    if v >= (10, 6, 106):
+        body['channel2gLockedTo6'] = False
+        body['dtimPeriod2gLockedTo3'] = False
+    aps = [a for a in (setting('unifiAps') or []) if a]
+    if aps:
+        body['broadcastingDeviceFilter'] = {'type': 'DEVICES', 'deviceIds': aps}
+    return body
+
+
+class WifiReconciler:
+    """Makes UniFi match the meetings: one network per live meeting with `wifi`, none otherwise.
+    One thread; poke() after any change, and it also runs every 5 minutes to retry and clean up."""
+    RETRY = 300
+
+    def __init__(self):
+        self.ev = threading.Event()
+        self.version = None
+
+    def poke(self):
+        self.ev.set()
+
+    def start(self):
+        threading.Thread(target=self.loop, name='unifi', daemon=True).start()
+        self.poke()
+
+    def loop(self):
+        while True:
+            self.ev.wait(self.RETRY)
+            self.ev.clear()
+            try:
+                self.run()
+            except Exception as e:
+                log('!! unifi', repr(e))
+
+    def _set(self, mid, **kw):
+        with LOCK:
+            m = STORE.meetings.get(mid)
+            if m:
+                m.update(kw)
+                STORE.save_meetings()
+
+    def _owned(self, add=None, drop=None):
+        with LOCK:
+            owned = [x for x in (STORE.settings.get('unifiOwned') or []) if x != drop]
+            if add and add not in owned:
+                owned.append(add)
+            STORE.settings['unifiOwned'] = owned
+            STORE.save_settings()
+
+    def run(self):
+        with LOCK:
+            meetings = {k: dict(v) for k, v in STORE.meetings.items()}
+            owned = list(STORE.settings.get('unifiOwned') or [])
+        want = {mid for mid, m in meetings.items() if m.get('wifi') and m['status'] == 'live'}
+        if not unifi_on():
+            for mid in want:
+                if meetings[mid].get('wifiState') != 'error':
+                    self._set(mid, wifiState='error', wifiError='UniFi is not set up (Admin -> Settings -> UniFi Wi-Fi).')
+            return
+        site = setting('unifiSite')
+        # 1. Take down what should not be up: ended meetings, Wi-Fi turned off, a new name or
+        #    password (made again below), and networks this server made that no meeting holds.
+        held = {}
+        for mid, m in meetings.items():
+            wid = m.get('wifiId')
+            if not wid:
+                continue
+            applied = m.get('wifiApplied') or {}
+            if mid in want and applied == {'name': m.get('wifiName'), 'pass': m.get('wifiPass'),
+                                           'site': site}:
+                # Still there? Someone may have deleted it in UniFi, or the console may be gone.
+                try:
+                    unifi_call('GET', '/v1/sites/%s/wifi/broadcasts/%s' % (site, wid))
+                except UnifiError as e:
+                    if ' 404' in str(e):
+                        self._owned(drop=wid)
+                        self._set(mid, wifiId=None, wifiApplied=None, wifiState='waiting', wifiError='')
+                        log('== Wi-Fi for "%s" was gone from UniFi; making it again' % m['title'])
+                        continue
+                    self._set(mid, wifiState='error', wifiError=str(e))
+                    held[wid] = mid
+                    continue
+                if m.get('wifiState') != 'up':
+                    self._set(mid, wifiState='up', wifiError='')
+                held[wid] = mid
+                continue
+            if self._delete(applied.get('site') or site, wid):
+                self._set(mid, wifiId=None, wifiApplied=None,
+                          wifiState='off' if mid not in want else 'waiting', wifiError='')
+        for wid in owned:
+            if wid not in held and not any(m.get('wifiId') == wid for m in meetings.values()):
+                self._delete(site, wid)
+        # 2. Bring up what should be up.
+        with LOCK:
+            meetings = {k: dict(v) for k, v in STORE.meetings.items()}
+        for mid in want:
+            m = meetings.get(mid)
+            if not m or m.get('wifiId'):
+                continue
+            if m.get('wifiState') == 'error' and time.time() < (m.get('wifiRetryAt') or 0):
+                continue
+            self._set(mid, wifiState='creating', wifiError='')
+            try:
+                if self.version is None:
+                    self.version = (unifi_call('GET', '/v1/info') or {}).get('applicationVersion', '')
+                made = unifi_call('POST', '/v1/sites/%s/wifi/broadcasts' % site, wifi_payload(m, self.version)) or {}
+                wid = made.get('id')
+                if not wid:
+                    raise UnifiError('UniFi made the network but gave no id back.')
+                self._owned(add=wid)
+                self._set(mid, wifiId=wid, wifiState='up', wifiError='', wifiRetryAt=None,
+                          wifiApplied={'name': m['wifiName'], 'pass': m['wifiPass'], 'site': site})
+                log('== Wi-Fi up for "%s": %s' % (m['title'], m['wifiName']))
+            except UnifiError as e:
+                self.version = None
+                self._set(mid, wifiState='error', wifiError=str(e), wifiRetryAt=time.time() + self.RETRY)
+                log('!! Wi-Fi for "%s": %s' % (m['title'], e))
+
+    def _delete(self, site, wid):
+        try:
+            unifi_call('DELETE', '/v1/sites/%s/wifi/broadcasts/%s?force=true' % (site, wid))
+        except UnifiError as e:
+            if ' 404' not in str(e):           # already gone is gone
+                log('!! Wi-Fi removal %s: %s' % (wid, e))
+                return False
+        self._owned(drop=wid)
+        log('== Wi-Fi removed: %s' % wid)
+        return True
+
+
+WIFI = WifiReconciler()
+
+
+# ---------------------------------------------------------------------------
 # Housekeeping: expired sessions, stale meetings, old transcripts, audio
 # ---------------------------------------------------------------------------
 def housekeeping():
@@ -1028,6 +1422,7 @@ def housekeeping():
                         m['status'], m['endedAt'] = st, t
                         changed = True
                         end_live(m['id'], st)
+                        WIFI.poke()
                         log('== meeting ended by itself:', m['title'])
                 if changed:
                     STORE.save_meetings()
@@ -1074,6 +1469,19 @@ class Handler(BaseHTTPRequestHandler):
     @property
     def tunnel(self):
         return getattr(self.server, 'tunnel', False)
+
+    def lan_url(self):
+        """Opened at localhost on the server itself (the home test kit's speaker on the PC, where
+        the microphone works over plain http), links and QR codes must still reach phones: the
+        same listener at this machine's LAN address. '' otherwise."""
+        host = (self.headers.get('Host') or '').rsplit(':', 1)[0].strip('[]').lower()
+        if self.tunnel or host not in ('localhost', '127.0.0.1', '::1'):
+            return ''
+        ip = lan_ip()
+        if not ip:
+            return ''
+        port, tls = self.server.server_address[1], isinstance(self.server, TLSServer)
+        return '%s://%s%s' % ('https' if tls else 'http', ip, '' if port == (443 if tls else 80) else ':%d' % port)
 
     def client_ip(self):
         if self.tunnel:
@@ -1248,7 +1656,8 @@ class Handler(BaseHTTPRequestHandler):
                 'serverStt': bool(setting('serverStt') and google_key()),
                 'liveCaptions': setting('liveCaptions'), 'guestsAllowed': setting('guestsAllowed'),
                 'publicUrl': setting('publicUrl'),
-                'onsiteReady': bool(setting('siteIps')) or not TUNNEL_IN_USE[0]})
+                'onsiteReady': bool(setting('siteIps')) or not TUNNEL_IN_USE[0],
+                'unifi': unifi_on(), 'lanUrl': self.lan_url()})
         if r == ('GET', 'code') and len(parts) == 2:
             ip = self.client_ip()
             if CODE_LIMIT.blocked(ip):
@@ -1399,6 +1808,7 @@ class Handler(BaseHTTPRequestHandler):
                     STORE.save_meetings()
                     if m['status'] == 'live':
                         live_for(m['id'], create=True)
+                    WIFI.poke()
                     return self.send_json(200, {'meeting': meeting_view(m, me)})
             raise HttpError(405, 'Method not allowed.')
 
@@ -1447,12 +1857,15 @@ class Handler(BaseHTTPRequestHandler):
                 if err:
                     raise HttpError(400, err)
                 STORE.save_meetings()
+            WIFI.poke()
+            with LOCK:
                 return self.send_json(200, {'meeting': meeting_view(m, me)})
         if (method, action) == ('DELETE', ''):
             end_live(m['id'], 'ended')
             with LOCK:
                 STORE.meetings.pop(m['id'], None)
                 STORE.save_meetings()
+            WIFI.poke()          # its Wi-Fi, if any, is now owned by no meeting and goes
             try:
                 os.remove(path(os.path.join('transcripts', m['id'] + '.jsonl')))
             except OSError:
@@ -1466,6 +1879,7 @@ class Handler(BaseHTTPRequestHandler):
             lv = live_for(m['id'], create=True)
             lv.broadcast('status', {'status': 'live'})
             WAITING.notify(m['id'], 'live')
+            WIFI.poke()
             with LOCK:
                 return self.send_json(200, {'meeting': meeting_view(m, me)})
         if (method, action) == ('POST', 'end'):
@@ -1477,6 +1891,7 @@ class Handler(BaseHTTPRequestHandler):
                 STORE.save_meetings()
             end_live(m['id'], st)
             WAITING.notify(m['id'], st)
+            WIFI.poke()
             with LOCK:
                 return self.send_json(200, {'meeting': meeting_view(m, me)})
         if (method, action) == ('POST', 'kick'):
@@ -1499,9 +1914,12 @@ class Handler(BaseHTTPRequestHandler):
             lv.remove(c.cid)
             return self.send_json(200, {'ok': True})
         if (method, action) == ('POST', 'newcode'):
-            # A sheet went somewhere it should not: every printed copy stops working.
+            # A sheet went somewhere it should not: every printed copy stops working, the
+            # meeting's Wi-Fi password with it (the network is made again with the new one).
             with LOCK:
                 m['code'] = new_code()
+                if m.get('wifi'):
+                    m['wifiPass'] = wifi_password()
                 STORE.save_meetings()
                 for k, s in list(STORE.sessions.items()):
                     if s.get('guest', {}).get('meeting') == m['id']:
@@ -1513,6 +1931,16 @@ class Handler(BaseHTTPRequestHandler):
                     if c.guest:
                         c.send('kicked', {'reason': 'code'})
                         lv.remove(c.cid)
+            WIFI.poke()
+            with LOCK:
+                return self.send_json(200, {'meeting': meeting_view(m, me)})
+        if (method, action) == ('POST', 'wifi'):
+            # The speaker's or admin's "try again" after a Wi-Fi error.
+            with LOCK:
+                if m.get('wifi'):
+                    m['wifiState'], m['wifiError'] = 'waiting', ''
+                    m.pop('wifiRetryAt', None)
+            WIFI.poke()
             with LOCK:
                 return self.send_json(200, {'meeting': meeting_view(m, me)})
         if (method, action) == ('POST', 'unkick'):
@@ -1743,9 +2171,34 @@ class Handler(BaseHTTPRequestHandler):
                 if err:
                     raise HttpError(400, err)
                 STORE.save_settings()
+            WIFI.poke()
             return self.settings_api('GET', [], me)
         if method == 'POST' and parts == ['test']:
             return self.send_json(200, {'results': engine_test()})
+        if method == 'POST' and parts == ['unifi-test']:
+            # TEST UNIFI: the address and key typed (or saved), checked against the console. On
+            # success both are saved and its certificate is pinned; the answer lists what to pick.
+            b = self.body_json()
+            url = str(b.get('url') or setting('unifiUrl') or '').strip().rstrip('/')
+            key = str(b.get('key') or '').strip() or unifi_key()
+            if not re.fullmatch(r'https://[A-Za-z0-9.\-]+(:\d+)?', url):
+                raise HttpError(400, 'The UniFi console address looks like https://192.168.1.1')
+            try:
+                found = unifi_probe(url, key)
+            except UnifiError as e:
+                raise HttpError(502, str(e))
+            with LOCK:
+                st = STORE.settings
+                st['unifiUrl'], st['unifiFingerprint'] = url, found['fingerprint']
+                if b.get('key'):
+                    st['unifiKey'] = key
+                ids = [x['id'] for x in found['sites']]
+                if st.get('unifiSite') not in ids:
+                    st['unifiSite'] = ids[0] if len(ids) == 1 else ''
+                STORE.save_settings()
+            WIFI.version = None
+            WIFI.poke()
+            return self.send_json(200, {'unifi': found, 'site': setting('unifiSite')})
         if method == 'POST' and parts == ['voice-sample']:
             # Admin -> Settings -> Hear each language: one English sentence, translated and voiced
             # exactly as a meeting would do it.
@@ -1786,6 +2239,24 @@ def apply_settings(b):
             if b[k] not in opts:
                 return '%s must be one of %s' % (k, ', '.join(opts))
             s[k] = b[k]
+    if 'unifiUrl' in b:
+        u = str(b['unifiUrl'] or '').strip().rstrip('/')
+        if u and not re.fullmatch(r'https://[A-Za-z0-9.\-]+(:\d+)?', u):
+            return 'The UniFi console address looks like https://192.168.1.1'
+        if u != s.get('unifiUrl'):
+            s['unifiFingerprint'] = ''       # a new address is trusted only after TEST UNIFI
+        s['unifiUrl'] = u
+    for k in ('unifiSite', 'unifiNetwork'):
+        if k in b:
+            v = str(b[k] or '').strip()
+            if v and not re.fullmatch(r'[A-Za-z0-9\-]{1,64}', v):
+                return '%s is not a UniFi id.' % k
+            s[k] = v
+    if 'unifiAps' in b:
+        aps = b['unifiAps'] if isinstance(b['unifiAps'], list) else []
+        if any(not re.fullmatch(r'[A-Za-z0-9\-]{1,64}', str(a)) for a in aps):
+            return 'unifiAps holds UniFi device ids.'
+        s['unifiAps'] = [str(a) for a in aps][:64]
     if 'siteIps' in b:
         ips = b['siteIps'] if isinstance(b['siteIps'], list) else str(b['siteIps'] or '').replace(',', ' ').split()
         clean = []
@@ -1980,16 +2451,33 @@ def main():
     ap.add_argument('--http', action='store_true', help='plain http (local testing only)')
     ap.add_argument('--tunnel-port', type=int, default=0, help='plain http on 127.0.0.1 for cloudflared')
     ap.add_argument('--data', default=ROOT)
+    ap.add_argument('--demo', action='store_true',
+                    help='add invented test accounts with known PINs (home or test networks only)')
+    ap.add_argument('--demo-setup', choices=('add', 'remove'),
+                    help='add or remove the test accounts in --data, then exit (the setup menu)')
     a = ap.parse_args()
     DATA = os.path.abspath(a.data)
     os.makedirs(DATA, exist_ok=True)
     STORE = Store()
     ensure_admin()
+    if a.demo_setup == 'remove':
+        print('Removed %d test accounts and %d demo meetings.' % remove_demo())
+        return
+    if a.demo or a.demo_setup:
+        sheet = seed_demo()
+        fd = os.open(path('demo-accounts.txt'), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(sheet)
+        if a.demo_setup:
+            print(sheet)
+            return
+        log('== --demo: test accounts (also in demo-accounts.txt). Not for a real server.\n' + sheet)
     # Meetings that were live when the server stopped carry on.
     for m in STORE.meetings.values():
         if m['status'] == 'live':
             live_for(m['id'], create=True)
     threading.Thread(target=housekeeping, daemon=True).start()
+    WIFI.start()
 
     servers = []
     if a.http:

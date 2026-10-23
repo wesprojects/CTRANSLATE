@@ -2,9 +2,11 @@
    scans a QR code reads every step in the language they picked first.
    Missing keys fall back to English. To add a language: add a block, keyed
    by the language id in server.py's LANGUAGES. scan = the line printed
-   under the QR code on the meeting sheet (every language has it). */
+   under the QR code on the meeting sheet (every language has it); scan2 = the
+   same line on a sheet with a Wi-Fi code first (missing: ① Wi-Fi → ② + scan). */
 window.VMI18N = {
-  en: {wifi: 'Connect to the company Wi-Fi, then scan again.', choose: 'Choose your language', listen: 'LISTEN', listenHint: 'Tap to hear this meeting in your language. Headphones work.',
+  en: {meetings: 'Meetings', noMeetings: 'No meetings for you right now.',
+    wifi: 'Connect to the company Wi-Fi, then scan again.', choose: 'Choose your language', listen: 'LISTEN', listenHint: 'Tap to hear this meeting in your language. Headphones work.',
     live: 'Live now', startsAt: 'Starts', waiting: 'Waiting for the meeting to start. Keep this screen open — it starts by itself.',
     ended: 'The meeting has ended. Thank you.', leave: 'LEAVE', voiceOn: 'VOICE ON', voiceOff: 'VOICE OFF', more: 'MORE',
     here: 'The translation appears here when someone speaks.', removed: 'You were removed from this meeting.',
@@ -12,8 +14,10 @@ window.VMI18N = {
     enterCode: 'Scan the meeting’s QR code with your camera, or type the code:', next: 'NEXT', staff: 'Staff sign-in',
     done: 'OK', keepOpen: 'Keep this app open. The screen stays on.', speed: 'Voice speed', orig: 'Show the original words',
     lang: 'Language', unavailable: 'Translation unavailable for this phrase.',
-    scan: 'Scan to hear this meeting in your language'},
-  es: {wifi: 'Con\u00e9ctese al Wi-Fi de la empresa y vuelva a escanear.', choose: 'Elija su idioma', listen: 'ESCUCHAR', listenHint: 'Toque para escuchar esta reunión en su idioma. Puede usar audífonos.',
+    scan: 'Scan to hear this meeting in your language',
+    scan2: 'Scan 1 to join the Wi-Fi, then 2 to hear this meeting in your language'},
+  es: {meetings: 'Reuniones', noMeetings: 'No tiene reuniones por ahora.',
+    wifi: 'Con\u00e9ctese al Wi-Fi de la empresa y vuelva a escanear.', choose: 'Elija su idioma', listen: 'ESCUCHAR', listenHint: 'Toque para escuchar esta reunión en su idioma. Puede usar audífonos.',
     live: 'En vivo', startsAt: 'Empieza', waiting: 'Esperando a que empiece la reunión. Mantenga esta pantalla abierta; empezará sola.',
     ended: 'La reunión ha terminado. Gracias.', leave: 'SALIR', voiceOn: 'VOZ: SÍ', voiceOff: 'VOZ: NO', more: 'MÁS',
     here: 'La traducción aparece aquí cuando alguien habla.', removed: 'Lo retiraron de esta reunión.',
@@ -21,8 +25,10 @@ window.VMI18N = {
     enterCode: 'Escanee el código QR de la reunión con la cámara o escriba el código:', next: 'SIGUIENTE', staff: 'Acceso del personal',
     done: 'ACEPTAR', keepOpen: 'Mantenga esta aplicación abierta. La pantalla seguirá encendida.', speed: 'Velocidad de la voz',
     orig: 'Mostrar las palabras originales', lang: 'Idioma', unavailable: 'No hay traducción para esta frase.',
-    scan: 'Escanee para escuchar esta reunión en su idioma'},
-  fr: {wifi: 'Connectez-vous au Wi-Fi de l\u2019entreprise, puis scannez \u00e0 nouveau.', choose: 'Choisissez votre langue', listen: 'ÉCOUTER', listenHint: 'Touchez pour écouter cette réunion dans votre langue. Les écouteurs fonctionnent.',
+    scan: 'Escanee para escuchar esta reunión en su idioma',
+    scan2: 'Escanee 1 para conectarse al Wi-Fi y luego 2 para escuchar esta reunión en su idioma'},
+  fr: {meetings: 'Réunions', noMeetings: 'Aucune réunion pour vous pour le moment.',
+    wifi: 'Connectez-vous au Wi-Fi de l\u2019entreprise, puis scannez \u00e0 nouveau.', choose: 'Choisissez votre langue', listen: 'ÉCOUTER', listenHint: 'Touchez pour écouter cette réunion dans votre langue. Les écouteurs fonctionnent.',
     live: 'En direct', startsAt: 'Commence', waiting: 'En attente du début de la réunion. Gardez cet écran ouvert ; elle démarrera toute seule.',
     ended: 'La réunion est terminée. Merci.', leave: 'QUITTER', voiceOn: 'VOIX : OUI', voiceOff: 'VOIX : NON', more: 'PLUS',
     here: 'La traduction s’affiche ici quand quelqu’un parle.', removed: 'Vous avez été retiré de cette réunion.',
@@ -30,8 +36,10 @@ window.VMI18N = {
     enterCode: 'Scannez le code QR de la réunion avec l’appareil photo, ou tapez le code :', next: 'SUIVANT', staff: 'Connexion du personnel',
     done: 'OK', keepOpen: 'Gardez cette application ouverte. L’écran reste allumé.', speed: 'Vitesse de la voix',
     orig: 'Afficher les mots d’origine', lang: 'Langue', unavailable: 'Traduction indisponible pour cette phrase.',
-    scan: 'Scannez pour écouter cette réunion dans votre langue'},
-  sw: {wifi: 'Unganisha kwenye Wi-Fi ya kampuni, kisha changanua tena.', choose: 'Chagua lugha yako', listen: 'SIKILIZA', listenHint: 'Gusa ili kusikiliza mkutano huu kwa lugha yako. Unaweza kutumia vipokea sauti.',
+    scan: 'Scannez pour écouter cette réunion dans votre langue',
+    scan2: 'Scannez 1 pour rejoindre le Wi-Fi, puis 2 pour écouter cette réunion dans votre langue'},
+  sw: {meetings: 'Mikutano', noMeetings: 'Hakuna mikutano yako kwa sasa.',
+    wifi: 'Unganisha kwenye Wi-Fi ya kampuni, kisha changanua tena.', choose: 'Chagua lugha yako', listen: 'SIKILIZA', listenHint: 'Gusa ili kusikiliza mkutano huu kwa lugha yako. Unaweza kutumia vipokea sauti.',
     live: 'Unaendelea sasa', startsAt: 'Unaanza', waiting: 'Tunasubiri mkutano uanze. Acha skrini hii wazi; utaanza wenyewe.',
     ended: 'Mkutano umekwisha. Asante.', leave: 'TOKA', voiceOn: 'SAUTI: IMEWASHWA', voiceOff: 'SAUTI: IMEZIMWA', more: 'ZAIDI',
     here: 'Tafsiri itaonekana hapa mtu anapozungumza.', removed: 'Umeondolewa kwenye mkutano huu.',
@@ -39,7 +47,8 @@ window.VMI18N = {
     enterCode: 'Changanua msimbo wa QR wa mkutano kwa kamera, au andika msimbo:', next: 'ENDELEA', staff: 'Kuingia kwa wafanyakazi',
     done: 'SAWA', keepOpen: 'Acha programu hii wazi. Skrini itabaki imewaka.', speed: 'Kasi ya sauti',
     orig: 'Onyesha maneno asilia', lang: 'Lugha', unavailable: 'Hakuna tafsiri ya sentensi hii.',
-    scan: 'Changanua ili usikilize mkutano huu kwa lugha yako'},
+    scan: 'Changanua ili usikilize mkutano huu kwa lugha yako',
+    scan2: 'Changanua 1 ili kujiunga na Wi-Fi, kisha 2 ili usikilize mkutano huu kwa lugha yako'},
   pl: {scan: 'Zeskanuj, aby słuchać tego spotkania w swoim języku', choose: 'Wybierz swój język', listen: 'SŁUCHAJ'},
   de: {scan: 'Scannen, um diese Besprechung in Ihrer Sprache zu hören', choose: 'Wählen Sie Ihre Sprache', listen: 'ANHÖREN'},
   zh: {scan: '扫码，用您的语言收听本次会议', choose: '选择您的语言', listen: '收听'},

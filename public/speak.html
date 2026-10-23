@@ -63,6 +63,7 @@
     <div style="flex:1;min-width:0">
       <div class="title" id="c-title"></div>
       <div class="meta"><span class="dot" id="c-dot"></span> <span id="c-meta"></span></div>
+      <div class="meta" id="c-wifi" hidden style="cursor:pointer"></div>
     </div>
     <button class="btn" id="c-share">QR</button>
     <button class="btn" id="c-people">PEOPLE</button>
@@ -129,7 +130,7 @@ function signIn() {
 
 async function home() {
   history.replaceState(null, '', '/speak');
-  $('page').hidden = false; $('console').hidden = true; document.body.classList.remove('fixed');
+  $('page').hidden = false; $('console').hidden = true; document.body.classList.remove('fixed'); wifiStop();
   $('page').innerHTML =
     '<div class="card"><h2>I speak</h2><select id="h-lang"></select></div>' +
     '<div class="card"><h2>Start</h2><div class="row">' +
@@ -161,12 +162,14 @@ function instant() {
     '<label class="f" for="i-title">Title</label><input id="i-title" maxlength="120" value="' + esc('Meeting ' + now.toLocaleDateString(undefined, {month: 'short', day: 'numeric'}) + ' ' + now.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'})) + '">' +
     '<label style="display:flex;align-items:center;margin-top:14px;font-size:13px"><input type="checkbox" id="i-standing">Standing room — keep the same QR code for every session (for a sign on the wall)</label>' +
     '<label style="display:flex;align-items:center;margin-top:10px;font-size:13px"><input type="checkbox" id="i-onsite"' + (VM.config.onsiteReady ? ' checked' : '') + '>Only phones on the company Wi-Fi can join</label>' +
+    (VM.config.unifi ? '<label style="display:flex;align-items:center;margin-top:10px;font-size:13px"><input type="checkbox" id="i-wifi"' + (VM.config.unifi ? ' checked' : '') + '>Make a temporary Wi-Fi network for it (UniFi)</label>' : '') +
     '<div class="err-text" id="i-err"></div>' +
     '<div class="actions"><button class="btn big" data-close>CANCEL</button><button class="btn big go" id="i-go">START NOW</button></div>');
   d.q('#i-go').onclick = async () => {
     try {
       const r = await VM.api('POST', 'meetings', {instant: true, title: d.q('#i-title').value,
-        standing: d.q('#i-standing').checked, onsite: d.q('#i-onsite').checked});
+        standing: d.q('#i-standing').checked, onsite: d.q('#i-onsite').checked,
+        wifi: !!(d.q('#i-wifi') && d.q('#i-wifi').checked)});
       d.close();
       await openConsole(r.meeting.id);
       VM.share(meeting, m => { meeting = m; });
@@ -198,6 +201,7 @@ function showState() {
   $('startbox').hidden = live;
   $('mic-area').hidden = !live;
   $('c-end').textContent = meeting.standing ? 'END SESSION' : 'END MEETING';
+  wifiShow();
   if (!live) {
     $('start-hint').textContent = meeting.standing ? 'Standing room: listeners who scanned the QR code are waiting. Start a session when you are ready.'
       : meeting.start ? 'Scheduled for ' + VM.fmtWhen(meeting.start) + '. Listeners who open it now wait until you start.' : 'Start when you are ready.';
@@ -223,7 +227,7 @@ function connect() {
     status(s) {
       if (s.status === 'live') { meeting.status = 'live'; showState(); stream.open(); }
       else if (s.status === 'scheduled') { meeting.status = 'scheduled'; stopTalking(); showState(); }
-      else if (s.status === 'ended') { meeting.status = 'ended'; stopTalking(); setMeta('ENDED', ''); VM.toast('The meeting has ended.'); stream.close(); setTimeout(home, 1500); }
+      else if (s.status === 'ended') { meeting.status = 'ended'; stopTalking(); wifiStop(); setMeta('ENDED', ''); VM.toast('The meeting has ended.'); stream.close(); setTimeout(home, 1500); }
     },
     reconnecting() { setMeta('RECONNECTING…', 'warn'); },
     closed() { setMeta('DISCONNECTED · RETRYING', 'err'); setTimeout(() => { if (stream && !stream.stopped) stream.open(); }, 4000); }
@@ -231,6 +235,26 @@ function connect() {
   stream.open();
 }
 function setMeta(t, cls) { $('c-meta').textContent = t; $('c-dot').className = 'dot ' + (cls || ''); }
+
+// Meeting Wi-Fi (UniFi): its state under the title, read again every 10 s while the console is
+// open. A tap opens the QR sheet, which has the network's code and TRY AGAIN.
+let wifiTimer = null;
+function wifiShow() {
+  const el = $('c-wifi'), on = !!(meeting && meeting.wifi);
+  el.hidden = !on;
+  if (on) { el.textContent = '\u{1F4F6} ' + VM.wifiLine(meeting); el.style.color = meeting.wifiState === 'error' ? 'var(--red)' : ''; }
+  clearInterval(wifiTimer); wifiTimer = null;
+  if (on && !$('console').hidden) wifiTimer = setInterval(async () => {
+    try {
+      const m = (await VM.api('GET', 'meetings/' + meeting.id)).meeting;
+      ['wifi', 'wifiName', 'wifiPass', 'wifiQr', 'wifiState', 'wifiError'].forEach(k => { meeting[k] = m[k]; });
+      el.textContent = '\u{1F4F6} ' + VM.wifiLine(meeting); el.style.color = meeting.wifiState === 'error' ? 'var(--red)' : '';
+      if (!meeting.wifi) wifiShow();
+    } catch (e) {}
+  }, 10000);
+}
+function wifiStop() { clearInterval(wifiTimer); wifiTimer = null; }
+$('c-wifi').onclick = () => $('c-share').click();
 
 $('c-start').onclick = async () => {
   try {
@@ -245,7 +269,7 @@ $('c-end').onclick = async () => {
   stopTalking();
   try {
     meeting = (await VM.api('POST', 'meetings/' + meeting.id + '/end')).meeting;
-    if (meeting.status === 'ended') { if (stream) stream.close(); VM.Wake.off(); home(); }
+    if (meeting.status === 'ended') { if (stream) stream.close(); VM.Wake.off(); wifiStop(); home(); }
     else { showState(); connect(); }
   } catch (e) { VM.toast(e.message); }
 };
@@ -253,9 +277,9 @@ $('c-back').onclick = () => {
   stopTalking();
   if (stream) { stream.close(); stream = null; }
   if (cid) VM.api('POST', 'meetings/' + meeting.id + '/leave', {cid}).catch(() => {});
-  P.shutdown(); VM.Wake.off(); home();
+  P.shutdown(); VM.Wake.off(); wifiStop(); home();
 };
-$('c-share').onclick = () => VM.share(meeting, m => { meeting = m; });
+$('c-share').onclick = () => VM.share(meeting, m => { meeting = m; wifiShow(); });
 $('c-people').onclick = () => {
   const list = others.filter(p => p.cid !== cid);
   const d = VM.modal('<h3>CONNECTED (' + list.length + ')</h3><div class="list" id="pp"></div>' +

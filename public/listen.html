@@ -186,7 +186,7 @@ async function showHome() {
   history.replaceState(null, '', '/listen');
   const p = $('page');
   p.innerHTML = '<div class="card"><h2>' + esc(T('lang')) + '</h2><select id="h-lang"></select></div>' +
-    '<div class="card"><h2>Meetings</h2><div class="list" id="h-list"><div class="empty">…</div></div></div>' +
+    '<div class="card"><h2>' + esc(T('meetings')) + '</h2><div class="list" id="h-list"><div class="empty">…</div></div></div>' +
     '<div class="card"><p>' + esc(T('enterCode')) + '</p><div class="row"><input id="code" class="grow" placeholder="ABC234" autocapitalize="characters" maxlength="8" style="text-transform:uppercase;letter-spacing:.2em"><button class="btn big go" id="code-go">' + esc(T('next')) + '</button></div></div>' +
     (VM.me.role !== 'listener' ? '<p class="hint">Speaking in a meeting? Open <a href="/speak">CTRANSLATE Speak</a>.</p>' : '');
   VM.fillLangs($('h-lang'), myLang);
@@ -198,7 +198,7 @@ async function showHome() {
   $('code-go').onclick = () => { const v = $('code').value.trim(); if (v) byCode(v); };
   try {
     const ms = (await VM.api('GET', 'meetings')).meetings.filter(m => m.status !== 'ended' && m.canJoin);
-    $('h-list').innerHTML = ms.length ? '' : '<div class="empty">No meetings for you right now.</div>';
+    $('h-list').innerHTML = ms.length ? '' : '<div class="empty">' + esc(T('noMeetings')) + '</div>';
     ms.forEach(m => {
       const d = document.createElement('div'); d.className = 'item';
       d.innerHTML = '<span class="dot ' + (m.status === 'live' ? 'live' : '') + '"></span><div class="grow"><div class="t">' + esc(m.title) + '</div>' +

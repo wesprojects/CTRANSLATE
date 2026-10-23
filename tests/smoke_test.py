@@ -141,6 +141,13 @@ def main():
     anon = Client()
     st, cfg = anon.req('GET', '/api/config')
     check(st == 200 and [l['id'] for l in cfg['languages']] == ['en', 'es', 'fr', 'sw'], 'config: English, Spanish, French, Swahili offered')
+    sys.path.insert(0, os.path.join(HERE, '..'))
+    import server as srvmod
+    ip = srvmod.lan_ip()
+    st, c1 = anon.req('GET', '/api/config', headers={'Host': 'localhost:%d' % PORT})
+    st, c2 = anon.req('GET', '/api/config', headers={'Host': '192.168.1.50:%d' % PORT})
+    check(c1['lanUrl'] == ('http://%s:%d' % (ip, PORT) if ip else '') and c2['lanUrl'] == '',
+          'opened at localhost, pages are told the LAN address for links (%s)' % (c1['lanUrl'] or 'no LAN here'))
     for page in ('/', '/listen', '/speak', '/admin', '/print', '/sw.js', '/app.js', '/i18n.js', '/qr.js', '/apps/listen.webmanifest'):
         st, body = anon.req('GET', page, raw=True)
         check(st == 200 and b'__BUILD__' not in body, 'serves %s with the build stamped in' % page)

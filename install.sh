@@ -80,6 +80,7 @@ if [ ! -f "$ETC/ctranslate.env" ]; then
 #GOOGLE_API_KEY=
 #ANTHROPIC_API_KEY=
 #AZURE_SPEECH_KEY=
+#UNIFI_API_KEY=
 ENV
 fi
 chown root:ctranslate "$ETC/ctranslate.env"; chmod 640 "$ETC/ctranslate.env"

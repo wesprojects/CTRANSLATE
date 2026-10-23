@@ -28,6 +28,12 @@
   .line[dir=rtl]{flex-direction:row-reverse;text-align:right}
   .foot{margin-top:6mm;font-size:10px;color:#666;letter-spacing:.08em}
   .icons{font-size:28px;letter-spacing:.4em;margin-top:2mm}
+  .two{display:flex;gap:8mm;justify-content:center;align-items:flex-start;margin-top:6mm}
+  .two>div{flex:1;max-width:84mm}
+  .two .qr{width:100%;margin:2mm auto}
+  .step{font:700 26px system-ui,sans-serif}
+  .net{font-size:15px;margin-top:1mm;word-break:break-all}
+  .two .code{font-size:26px}
   @media print{body{background:#fff}.tools{display:none}.sheet{box-shadow:none;margin:0 auto;width:100%;padding:0}}
 </style>
 </head>
@@ -46,18 +52,29 @@
     const m = (await VM.api('GET', 'meetings/' + id)).meeting;
     const link = VM.joinLink(m);
     const langs = VM.config.languages;
+    // With meeting Wi-Fi (hosts see its name and password), the sheet has two codes: the
+    // network first, then the meeting.
+    const wifi = !!(m.wifi && m.wifiQr && m.wifiName);
+    const scan2 = id => (VMI18N[id] && VMI18N[id].scan2) || ('\u2460 Wi-Fi \u2192 \u2461 ' + VMT(id, 'scan'));
     document.title = 'CTRANSLATE — ' + m.title;
     VM.$('sheet').innerHTML =
       '<div class="org">' + esc((VM.config.orgName || '').toUpperCase()) + '</div>' +
       '<h1>' + esc(m.title) + '</h1>' +
       '<div class="sub">' + (m.standing ? 'This code works for every session in this room.' : esc(VM.fmtWhen(m.start || m.startedAt))) + '</div>' +
-      '<div class="icons">\u{1F4F1} → \u{1F3A7}</div>' +
-      '<div class="qr">' + VMQR.svg(link) + '</div>' +
-      '<div class="code">' + esc(m.code) + '</div>' +
-      '<div class="url">' + esc(link) + '</div>' +
+      (wifi ?
+        '<div class="two"><div><div class="step">\u2460 Wi-Fi</div><div class="qr">' + VMQR.svg(m.wifiQr) + '</div>' +
+          '<div class="net">\u{1F4F6} ' + esc(m.wifiName) + '</div><div class="net">\u{1F511} ' + esc(m.wifiPass) + '</div></div>' +
+        '<div><div class="step">\u2461 \u{1F3A7}</div><div class="qr">' + VMQR.svg(link) + '</div>' +
+          '<div class="code">' + esc(m.code) + '</div></div></div>' +
+        '<div class="url">' + esc(link) + '</div>'
+      : '<div class="icons">\u{1F4F1} → \u{1F3A7}</div>' +
+        '<div class="qr">' + VMQR.svg(link) + '</div>' +
+        '<div class="code">' + esc(m.code) + '</div>' +
+        '<div class="url">' + esc(link) + '</div>') +
       '<div class="lines">' + langs.map(l =>
-        '<div class="line"' + (l.id === 'ar' ? ' dir="rtl"' : '') + '><b>' + esc(l.label) + '</b><span>' + esc(VMT(l.id, 'scan')) + '</span></div>').join('') + '</div>' +
-      '<div class="foot">' + (m.onsite ? 'Connect to the company Wi-Fi first. ' : '') + 'No app to install and no sign-up. Headphones work.</div>';
+        '<div class="line"' + (l.id === 'ar' ? ' dir="rtl"' : '') + '><b>' + esc(l.label) + '</b><span>' + esc(wifi ? scan2(l.id) : VMT(l.id, 'scan')) + '</span></div>').join('') + '</div>' +
+      '<div class="foot">' + (wifi ? 'The Wi-Fi network is on only while the meeting is live. ' : m.onsite ? 'Connect to the company Wi-Fi first. ' : '') +
+        'No app to install and no sign-up. Headphones work.</div>';
     if (new URLSearchParams(location.search).get('auto') === '1') setTimeout(print, 400);
   } catch (e) {
     VM.$('sheet').textContent = e.status === 401 ? 'Sign in to CTRANSLATE Speak or Admin first, then print the sheet again.' : e.message;
