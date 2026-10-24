@@ -84,8 +84,8 @@ jobs:
           BUILD: ${{ steps.parts.outputs.build }}
         run: |
           cd /mnt/iso
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release delete "$TAG" -y $([ "$GITHUB_REF_TYPE" = tag ] || echo --cleanup-tag)
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$TAG" -R "$GITHUB_REPOSITORY" -y $([ "$GITHUB_REF_TYPE" = tag ] || echo --cleanup-tag)
           fi
-          gh release create "$TAG" --target "$GITHUB_SHA" --title "CTRANSLATE server installer $BUILD" \
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "CTRANSLATE server installer $BUILD" \
             --notes-file notes.md ctranslate-server-installer.iso.part* join-iso.bat ctranslate-server-installer.iso.sha256
