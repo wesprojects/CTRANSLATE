@@ -33,7 +33,7 @@ import http.client, os, queue, re, secrets, socket, ssl, sys, threading, time, u
 import urllib.error, urllib.parse, urllib.request
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-BUILD_VERSION = '2026-10-23.2'   # format: YYYY-MM-DD.N, bump every revision; pages show it
+BUILD_VERSION = '2026-10-24.1'   # format: YYYY-MM-DD.N, bump every revision; pages show it
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PUBLIC = os.path.join(ROOT, 'public')

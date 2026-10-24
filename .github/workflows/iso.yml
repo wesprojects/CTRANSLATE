@@ -1,0 +1,91 @@
+# Builds the CTRANSLATE server installer ISO (iso/build-iso.sh) and posts it as a release.
+# GitHub keeps release files under 2 GiB, so the ISO comes in parts with join-iso.bat
+# (Windows) and its SHA-256. Run it from Actions -> Build installer ISO -> Run workflow,
+# or push a tag named iso-<anything>.
+name: Build installer ISO
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['iso-*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: iso
+  cancel-in-progress: false
+
+jobs:
+  iso:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make room (the Ubuntu ISO, the new ISO and its parts)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo mkdir -p /mnt/iso && sudo chown "$USER" /mnt/iso
+          df -h / /mnt
+
+      - name: Tools
+        run: sudo apt-get update -q && sudo apt-get install -y -q xorriso python3-yaml
+
+      - name: Tests (server, setup menu, UniFi, test accounts)
+        run: |
+          python3 tests/smoke_test.py
+          python3 tests/setup_test.py
+          python3 tests/unifi_test.py
+          python3 tests/demo_test.py
+
+      - name: Build the ISO
+        env:
+          XDG_CACHE_HOME: /mnt/iso/cache
+        run: bash iso/build-iso.sh --out /mnt/iso/ctranslate-server-installer.iso
+
+      - name: Split it for the release
+        id: parts
+        run: |
+          cd /mnt/iso
+          BUILD=$(grep -o "BUILD_VERSION = '[^']*'" "$GITHUB_WORKSPACE/server.py" | cut -d"'" -f2)
+          SUM=$(sha256sum ctranslate-server-installer.iso | cut -d' ' -f1)
+          split -b 1900M -d -a 1 ctranslate-server-installer.iso ctranslate-server-installer.iso.part
+          rm ctranslate-server-installer.iso
+          PARTS=$(ls ctranslate-server-installer.iso.part* | sort)
+          JOIN=$(echo $PARTS | sed 's/ / + /g')
+          printf '%s\r\n' '@echo off' \
+            'rem Joins the downloaded parts into ctranslate-server-installer.iso and checks it.' \
+            'cd /d "%~dp0"' \
+            "copy /b $JOIN ctranslate-server-installer.iso || (pause & exit /b 1)" \
+            'certutil -hashfile ctranslate-server-installer.iso SHA256' \
+            "echo It should read: $SUM" \
+            'pause' > join-iso.bat
+          echo "$SUM  ctranslate-server-installer.iso" > ctranslate-server-installer.iso.sha256
+          {
+            echo "CTRANSLATE server installer, build $BUILD (Ubuntu Server 24.04)."
+            echo
+            echo "Download every part below and join-iso.bat into one folder."
+            echo
+            echo "- **Windows:** double-click join-iso.bat. It writes ctranslate-server-installer.iso and prints its SHA-256, which should be $SUM."
+            echo "- **Mac or Linux:** \`cat ctranslate-server-installer.iso.part* > ctranslate-server-installer.iso && sha256sum -c ctranslate-server-installer.iso.sha256\`"
+            echo
+            echo "Write the ISO to a USB stick with Rufus (DD image mode if it asks) or balenaEtcher, and boot the server from it. The installer asks which disk to use before it erases anything. See iso/README.md."
+          } > notes.md
+          if [ "$GITHUB_REF_TYPE" = tag ]; then TAG=$GITHUB_REF_NAME; else TAG=iso-$BUILD; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          ls -l /mnt/iso
+
+      - name: Post the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.parts.outputs.tag }}
+          BUILD: ${{ steps.parts.outputs.build }}
+        run: |
+          cd /mnt/iso
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" -y $([ "$GITHUB_REF_TYPE" = tag ] || echo --cleanup-tag)
+          fi
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "CTRANSLATE server installer $BUILD" \
+            --notes-file notes.md ctranslate-server-installer.iso.part* join-iso.bat ctranslate-server-installer.iso.sha256

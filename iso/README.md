@@ -2,7 +2,13 @@
 
 `build-iso.sh` turns the Ubuntu Server 24.04 ISO into a CTRANSLATE installer. Write it to a USB stick, boot the server machine from it, and it installs Ubuntu and CTRANSLATE together. Nothing needs the internet during the install.
 
-## Build it
+## Download it
+
+GitHub builds the ISO for you: [Releases](https://github.com/wesprojects/CTRANSLATE/releases). GitHub keeps each release file under 2 GB, so the ISO comes in parts: download every part and `join-iso.bat` into one folder, then double-click `join-iso.bat` (Windows; it prints the SHA-256 to compare with the release notes), or `cat ctranslate-server-installer.iso.part* > ctranslate-server-installer.iso` (Mac, Linux). The repository is public, so the release is too; the ISO holds no keys or PINs.
+
+For a new release after changes: **Actions → Build installer ISO → Run workflow** on `main` (`.github/workflows/iso.yml`; it runs the tests first, about 20 minutes in all). It replaces the release of the same build.
+
+## Build it yourself
 
 On any Linux machine (Ubuntu, Debian, or WSL on Windows), from the repository folder:
 

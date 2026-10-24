@@ -93,7 +93,7 @@ It prints the admin PIN. Open `http://localhost:8080/admin` on that PC, enter th
 
 ## Install from the ISO (recommended)
 
-`bash iso/build-iso.sh` makes `ctranslate-server-installer.iso`: write it to a USB stick and boot the server from it. It installs Ubuntu Server 24.04 and CTRANSLATE together, with no internet needed. On the first start a setup menu walks through the time zone, network, Cloudflare Tunnel and API keys. See [iso/README.md](iso/README.md).
+`bash iso/build-iso.sh` makes `ctranslate-server-installer.iso`: write it to a USB stick and boot the server from it. It installs Ubuntu Server 24.04 and CTRANSLATE together, with no internet needed. On the first start a setup menu walks through the time zone, network, Cloudflare Tunnel and API keys. Or download one GitHub built: [Releases](https://github.com/wesprojects/CTRANSLATE/releases) (in parts; `join-iso.bat` joins them). See [iso/README.md](iso/README.md).
 
 The same menu is on every CTRANSLATE server: `sudo ctranslate-setup`.
 
